@@ -146,7 +146,7 @@ class MapGenerator:
         
         m = self.create_base_map()
         self.add_ports(m)
-        self.add_vessels(m)
+        self.add_vessels(m, vessels)
         
         m.save(self.output_file)
         logger.info(f"✅ Map saved to {self.output_file}\n")

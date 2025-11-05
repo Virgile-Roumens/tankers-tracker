@@ -1,9 +1,5 @@
 # Tankers Tracker - Project Summary
 
-## 🎉 Repository Successfully Created!
-
-Your professional, scalable tankers tracker repository is ready for collaboration.
-
 ---
 
 ## 📁 Repository Structure
@@ -83,7 +79,7 @@ tankers-tracker/
 
 ```bash
 # Clone repository
-git clone <your-repo-url>
+git clone <https://github.com/Virgile-Roumens/tankers-tracker.git>
 cd tankers-tracker
 
 # Create virtual environment
@@ -272,13 +268,13 @@ MIT License - See LICENSE file for details
 - ✅ Tests included
 - ✅ Ready for collaboration
 
-## 🎊 You're All Set!
+## 🎊 All Set!
 
-Your repository is production-ready and collaboration-friendly. Share it with your team and start building amazing features together!
+The repository is production-ready and collaboration-friendly. Share it with your team, let's start building amazing features together!
 
 ```bash
 # To push to GitHub:
-git remote add origin <your-github-repo-url>
+git remote add origin <https://github.com/Virgile-Roumens/tankers-tracker.git>
 git push -u origin master
 git push origin develop
 ```
