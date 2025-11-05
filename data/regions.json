@@ -1,0 +1,30 @@
+{
+    "persian_gulf": {
+        "bounding_box": [[22, 48], [30, 60]],
+        "ports": [
+            {"name": "Ras Tanura", "lat": 26.6408, "lon": 50.1735, "country": "Saudi Arabia"},
+            {"name": "Mina Al Ahmadi", "lat": 29.0769, "lon": 48.1631, "country": "Kuwait"},
+            {"name": "Kharg Island", "lat": 29.2603, "lon": 50.3241, "country": "Iran"},
+            {"name": "Jebel Ali", "lat": 25.0118, "lon": 55.0618, "country": "UAE"},
+            {"name": "Fujairah", "lat": 25.1164, "lon": 56.3365, "country": "UAE"},
+            {"name": "Das Island", "lat": 25.1500, "lon": 52.8700, "country": "UAE"},
+            {"name": "Ruwais", "lat": 24.1100, "lon": 52.7300, "country": "UAE"}
+        ]
+    },
+    "singapore_strait": {
+        "bounding_box": [[0, 100], [6, 106]],
+        "ports": []
+    },
+    "suez_canal": {
+        "bounding_box": [[29, 32], [32, 34]],
+        "ports": []
+    },
+    "us_gulf": {
+        "bounding_box": [[25, -98], [31, -80]],
+        "ports": []
+    },
+    "north_sea": {
+        "bounding_box": [[51, -4], [62, 10]],
+        "ports": []
+    }
+}
