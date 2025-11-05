@@ -4,38 +4,98 @@ Vessel data model for representing tracked ships.
 
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Optional
+from typing import Optional, List
 
 
 @dataclass
 class Vessel:
     """
-    Represents a tracked vessel with AIS data.
+    Represents a tracked vessel with comprehensive AIS data.
     
     Attributes:
         mmsi: Maritime Mobile Service Identity (unique vessel ID)
+        
+        # Position Data
         lat: Current latitude
         lon: Current longitude
-        name: Vessel name
         speed: Speed over ground in knots
         course: Course over ground in degrees
-        destination: Destination port
+        heading: True heading in degrees
+        rot: Rate of turn
+        navigational_status: Navigation status code (0-15)
+        position_accuracy: Position accuracy (0=low >10m, 1=high <10m)
+        
+        # Static Vessel Data
+        name: Vessel name
+        imo: IMO number (International Maritime Organization)
+        callsign: Radio callsign
         ship_type: IMO ship type code
+        
+        # Dimensions (in meters)
+        length: Length overall
+        width: Beam (width)
+        draught: Current draught (depth in water)
+        dimension_to_bow: Distance from GPS to bow
+        dimension_to_stern: Distance from GPS to stern
+        dimension_to_port: Distance from GPS to port side
+        dimension_to_starboard: Distance from GPS to starboard side
+        
+        # Voyage Data
+        destination: Destination port
+        eta: Estimated time of arrival (timestamp)
+        cargo: Cargo type/description
+        deadweight: Deadweight tonnage (DWT)
+        gross_tonnage: Gross tonnage (GT)
+        
+        # Tracking Metadata
         last_update: Timestamp of last position update
+        first_seen: Timestamp when vessel was first detected
+        update_count: Number of position updates received
     """
     
     mmsi: int
+    
+    # Position Data
     lat: Optional[float] = None
     lon: Optional[float] = None
-    name: Optional[str] = None
     speed: Optional[float] = None
     course: Optional[float] = None
-    destination: Optional[str] = None
+    heading: Optional[int] = None
+    rot: Optional[float] = None
+    navigational_status: Optional[int] = None
+    position_accuracy: Optional[int] = None
+    
+    # Static Vessel Data
+    name: Optional[str] = None
+    imo: Optional[int] = None
+    callsign: Optional[str] = None
     ship_type: Optional[int] = None
+    
+    # Dimensions
+    length: Optional[float] = None
+    width: Optional[float] = None
+    draught: Optional[float] = None
+    dimension_to_bow: Optional[int] = None
+    dimension_to_stern: Optional[int] = None
+    dimension_to_port: Optional[int] = None
+    dimension_to_starboard: Optional[int] = None
+    
+    # Voyage Data
+    destination: Optional[str] = None
+    eta: Optional[str] = None
+    cargo: Optional[str] = None
+    deadweight: Optional[int] = None
+    gross_tonnage: Optional[int] = None
+    
+    # Tracking Metadata
     last_update: Optional[str] = None
+    first_seen: Optional[str] = None
+    update_count: int = 0
     
     def update_position(self, lat: float, lon: float, speed: Optional[float] = None, 
-                       course: Optional[float] = None, timestamp: Optional[str] = None) -> None:
+                       course: Optional[float] = None, heading: Optional[int] = None,
+                       rot: Optional[float] = None, navigational_status: Optional[int] = None,
+                       position_accuracy: Optional[int] = None, timestamp: Optional[str] = None) -> None:
         """
         Update vessel position data.
         
@@ -44,6 +104,10 @@ class Vessel:
             lon: New longitude
             speed: Speed over ground in knots
             course: Course over ground in degrees
+            heading: True heading in degrees
+            rot: Rate of turn
+            navigational_status: Navigation status code
+            position_accuracy: GPS accuracy indicator
             timestamp: Update timestamp
         """
         self.lat = lat
@@ -52,11 +116,34 @@ class Vessel:
             self.speed = round(speed, 1)
         if course is not None:
             self.course = round(course, 1)
+        if heading is not None:
+            self.heading = heading
+        if rot is not None:
+            self.rot = round(rot, 2)
+        if navigational_status is not None:
+            self.navigational_status = navigational_status
+        if position_accuracy is not None:
+            self.position_accuracy = position_accuracy
+        
         self.last_update = timestamp or datetime.utcnow().strftime("%H:%M:%S")
+        self.update_count += 1
+        
+        if self.first_seen is None:
+            self.first_seen = self.last_update
     
     def update_static_data(self, name: Optional[str] = None, 
                           destination: Optional[str] = None,
-                          ship_type: Optional[int] = None) -> None:
+                          ship_type: Optional[int] = None,
+                          imo: Optional[int] = None,
+                          callsign: Optional[str] = None,
+                          length: Optional[float] = None,
+                          width: Optional[float] = None,
+                          draught: Optional[float] = None,
+                          dimension_to_bow: Optional[int] = None,
+                          dimension_to_stern: Optional[int] = None,
+                          dimension_to_port: Optional[int] = None,
+                          dimension_to_starboard: Optional[int] = None,
+                          eta: Optional[str] = None) -> None:
         """
         Update vessel static information.
         
@@ -64,6 +151,16 @@ class Vessel:
             name: Vessel name
             destination: Destination port
             ship_type: IMO ship type code
+            imo: IMO number
+            callsign: Radio callsign
+            length: Length overall
+            width: Beam (width)
+            draught: Current draught
+            dimension_to_bow: Distance to bow
+            dimension_to_stern: Distance to stern
+            dimension_to_port: Distance to port
+            dimension_to_starboard: Distance to starboard
+            eta: Estimated time of arrival
         """
         if name:
             self.name = name.strip()
@@ -71,6 +168,26 @@ class Vessel:
             self.destination = destination.strip()
         if ship_type is not None:
             self.ship_type = ship_type
+        if imo is not None:
+            self.imo = imo
+        if callsign:
+            self.callsign = callsign.strip()
+        if length is not None:
+            self.length = length
+        if width is not None:
+            self.width = width
+        if draught is not None:
+            self.draught = round(draught, 1)
+        if dimension_to_bow is not None:
+            self.dimension_to_bow = dimension_to_bow
+        if dimension_to_stern is not None:
+            self.dimension_to_stern = dimension_to_stern
+        if dimension_to_port is not None:
+            self.dimension_to_port = dimension_to_port
+        if dimension_to_starboard is not None:
+            self.dimension_to_starboard = dimension_to_starboard
+        if eta:
+            self.eta = eta
     
     def has_position(self) -> bool:
         """Check if vessel has valid position data."""
@@ -80,6 +197,34 @@ class Vessel:
         """Check if vessel is a tanker type."""
         return self.ship_type in tanker_types if self.ship_type else False
     
+    def get_dimensions(self) -> str:
+        """Get formatted vessel dimensions."""
+        if self.length and self.width:
+            return f"{self.length:.0f}m × {self.width:.0f}m"
+        return "Unknown"
+    
+    def get_navigational_status_text(self) -> str:
+        """Get human-readable navigation status."""
+        status_map = {
+            0: "Under way using engine",
+            1: "At anchor",
+            2: "Not under command",
+            3: "Restricted manoeuvrability",
+            4: "Constrained by draught",
+            5: "Moored",
+            6: "Aground",
+            7: "Engaged in fishing",
+            8: "Under way sailing",
+            9: "Reserved for HSC",
+            10: "Reserved for WIG",
+            11: "Reserved",
+            12: "Reserved",
+            13: "Reserved",
+            14: "AIS-SART",
+            15: "Not defined"
+        }
+        return status_map.get(self.navigational_status, "Unknown")
+    
     def to_dict(self) -> dict:
         """Convert vessel to dictionary representation."""
         return {
@@ -87,11 +232,25 @@ class Vessel:
             "lat": self.lat,
             "lon": self.lon,
             "name": self.name,
+            "imo": self.imo,
+            "callsign": self.callsign,
             "speed": self.speed,
             "course": self.course,
+            "heading": self.heading,
+            "rot": self.rot,
+            "navigational_status": self.navigational_status,
             "destination": self.destination,
+            "eta": self.eta,
             "ship_type": self.ship_type,
-            "last_update": self.last_update
+            "length": self.length,
+            "width": self.width,
+            "draught": self.draught,
+            "cargo": self.cargo,
+            "deadweight": self.deadweight,
+            "gross_tonnage": self.gross_tonnage,
+            "last_update": self.last_update,
+            "first_seen": self.first_seen,
+            "update_count": self.update_count
         }
     
     def __str__(self) -> str:

@@ -17,10 +17,16 @@ AIS_API_KEY = os.getenv("AIS_API_KEY", "77751d32bae3caa0b20f2d7099f03ef5b836fb4c
 AIS_URL = "wss://stream.aisstream.io/v0/stream"
 
 # Application Settings
-MAX_TRACKED_SHIPS = int(os.getenv("MAX_TRACKED_SHIPS", "100"))
-UPDATE_INTERVAL = int(os.getenv("UPDATE_INTERVAL", "2"))
-AUTO_MAP_UPDATE_SECONDS = int(os.getenv("AUTO_MAP_UPDATE_SECONDS", "10"))
+MAX_TRACKED_SHIPS = int(os.getenv("MAX_TRACKED_SHIPS", "500"))  # Increased for more tracking
+UPDATE_INTERVAL = int(os.getenv("UPDATE_INTERVAL", "5"))  # Update map every N position reports
+AUTO_MAP_UPDATE_SECONDS = int(os.getenv("AUTO_MAP_UPDATE_SECONDS", "15"))  # Auto-refresh interval
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
+
+# Performance Settings
+ENABLE_CONCURRENT_PROCESSING = os.getenv("ENABLE_CONCURRENT_PROCESSING", "true").lower() == "true"
+MESSAGE_BATCH_SIZE = int(os.getenv("MESSAGE_BATCH_SIZE", "10"))  # Process messages in batches
+USE_DATABASE_CACHE = os.getenv("USE_DATABASE_CACHE", "true").lower() == "true"
+DATABASE_PATH = os.getenv("DATABASE_PATH", "data/vessels.db")
 
 # Ship Type Definitions (IMO codes)
 TANKER_TYPES = list(range(70, 90))  # 70-89 are tanker/cargo vessel types
@@ -67,6 +73,16 @@ PORTS: Dict[str, List[Dict]] = {
     "north_sea": [
         {"name": "Rotterdam", "lat": 51.9225, "lon": 4.4792, "country": "🇳🇱 Netherlands"},
         {"name": "Antwerp", "lat": 51.2194, "lon": 4.4025, "country": "🇧🇪 Belgium"},
+    ],
+    "mediterranean": [
+        {"name": "Marseille", "lat": 43.2965, "lon": 5.3698, "country": "🇫🇷 France"},
+        {"name": "Genoa", "lat": 44.4056, "lon": 8.9463, "country": "🇮🇹 Italy"},
+        {"name": "Barcelona", "lat": 41.3851, "lon": 2.1734, "country": "🇪🇸 Spain"},
+        {"name": "Piraeus", "lat": 37.9838, "lon": 23.7275, "country": "🇬🇷 Greece"},
+        {"name": "Istanbul", "lat": 41.0082, "lon": 28.9784, "country": "🇹🇷 Turkey"},
+        {"name": "Alexandria", "lat": 31.2001, "lon": 29.9187, "country": "🇪🇬 Egypt"},
+        {"name": "Trieste", "lat": 45.6495, "lon": 13.7768, "country": "🇮🇹 Italy"},
+        {"name": "Valencia", "lat": 39.4699, "lon": -0.3763, "country": "🇪🇸 Spain"},
     ],
 }
 
