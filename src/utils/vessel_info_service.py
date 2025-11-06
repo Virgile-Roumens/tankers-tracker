@@ -43,11 +43,16 @@ class VesselInfoService:
     def _load_from_database(self):
         """Load vessels from database into cache."""
         try:
+            # Check for missing ship_type data
+            self.db.fix_missing_ship_types()
+            
             vessels = self.db.get_all_vessels()
             for vessel in vessels:
                 self.vessels_cache[vessel.mmsi] = vessel
             
-            logger.info(f"📚 Loaded {len(vessels)} vessels from database")
+            # Count how many vessels have ship_type data
+            with_ship_type = len([v for v in vessels if v.ship_type is not None])
+            logger.info(f"📚 Loaded {len(vessels)} vessels from database ({with_ship_type} with ship_type)")
             
         except Exception as e:
             logger.error(f"Failed to load vessels from database: {e}")

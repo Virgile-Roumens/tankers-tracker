@@ -63,40 +63,84 @@ class AISClient:
         self.message_queue: deque = deque()
         self.processing_task: Optional[asyncio.Task] = None
         
+        # Reconnection parameters
+        self.reconnect_attempts = 0
+        self.max_reconnect_delay = 60  # Max 60 seconds between reconnects
+        self.running = True
+        
     async def connect(self):
-        """Establish WebSocket connection and start listening for messages."""
+        """Establish WebSocket connection with automatic reconnection."""
         logger.info("Connecting to AIS Stream...")
         logger.info(f"Tracking region: {self.region_bounds}")
         logger.info(f"Max vessels: {self.max_vessels}")
         logger.info(f"Concurrent processing: {self.enable_concurrent}\n")
         
-        try:
-            async with websockets.connect(AIS_URL) as websocket:
-                logger.info("✅ Connected to AIS Stream!\n")
+        while self.running:
+            try:
+                async with websockets.connect(
+                    AIS_URL,
+                    ping_interval=20,  # Send ping every 20 seconds
+                    ping_timeout=10,   # Wait 10 seconds for pong
+                    close_timeout=10   # Wait 10 seconds for close frame
+                ) as websocket:
+                    logger.info("✅ Connected to AIS Stream!\n")
+                    
+                    # Reset reconnection counter on successful connection
+                    self.reconnect_attempts = 0
+                    
+                    # Send subscription message
+                    await self._subscribe(websocket)
+                    
+                    # Start concurrent message processor if enabled
+                    if self.enable_concurrent:
+                        self.processing_task = asyncio.create_task(self._batch_processor())
+                    
+                    # Listen for messages
+                    await self._listen(websocket)
+                    
+            except (websockets.exceptions.WebSocketException, 
+                    websockets.exceptions.ConnectionClosed,
+                    ConnectionResetError,
+                    asyncio.TimeoutError) as e:
                 
-                # Send subscription message
-                await self._subscribe(websocket)
+                if not self.running:
+                    break
                 
-                # Start concurrent message processor if enabled
-                if self.enable_concurrent:
-                    self.processing_task = asyncio.create_task(self._batch_processor())
+                # Calculate exponential backoff delay
+                self.reconnect_attempts += 1
+                delay = min(2 ** self.reconnect_attempts, self.max_reconnect_delay)
                 
-                # Listen for messages
-                await self._listen(websocket)
+                logger.warning(f"⚠️  Connection lost: {type(e).__name__}")
+                logger.info(f"🔄 Reconnecting in {delay} seconds... (attempt {self.reconnect_attempts})")
                 
-        except websockets.exceptions.WebSocketException as e:
-            logger.error(f"WebSocket error: {e}")
-            logger.info("Reconnecting in 5 seconds...")
-            await asyncio.sleep(5)
-            await self.connect()  # Reconnect
-            
-        except Exception as e:
-            logger.error(f"Unexpected error: {e}")
-            raise
-        finally:
-            # Cancel processing task on disconnect
-            if self.processing_task:
-                self.processing_task.cancel()
+                # Cancel processing task if exists
+                if self.processing_task and not self.processing_task.done():
+                    self.processing_task.cancel()
+                    try:
+                        await self.processing_task
+                    except asyncio.CancelledError:
+                        pass
+                
+                await asyncio.sleep(delay)
+                
+            except Exception as e:
+                logger.error(f"❌ Unexpected error: {e}")
+                import traceback
+                traceback.print_exc()
+                
+                if not self.running:
+                    break
+                
+                # Wait before retry on unexpected errors
+                await asyncio.sleep(10)
+    
+    def stop(self):
+        """Stop the AIS client and prevent reconnection."""
+        logger.info("Stopping AIS client...")
+        self.running = False
+        
+        if self.processing_task and not self.processing_task.done():
+            self.processing_task.cancel()
     
     async def _subscribe(self, websocket):
         """Send subscription message to AIS Stream."""
@@ -167,6 +211,10 @@ class AISClient:
         mmsi = static_data["UserID"]
         ship_type = static_data.get("Type")
         
+        # Debug: Log ship type information
+        if ship_type is not None:
+            logger.debug(f"Received ship_type {ship_type} for vessel {mmsi}")
+        
         # Accept if we have space or already tracking
         if len(self.vessels) < self.max_vessels or mmsi in self.vessels:
             self.static_count += 1
@@ -178,7 +226,27 @@ class AISClient:
             # Extract dimensions
             dimension_data = static_data.get("Dimension", {})
             
+            # Process ETA data (convert dict to string if needed)
+            eta_data = static_data.get("Eta")
+            eta_string = None
+            if eta_data:
+                if isinstance(eta_data, dict):
+                    # Convert ETA dict to readable string format
+                    month = eta_data.get("Month", 0)
+                    day = eta_data.get("Day", 0) 
+                    hour = eta_data.get("Hour", 24)
+                    minute = eta_data.get("Minute", 60)
+                    
+                    if month > 0 and day > 0:
+                        if hour < 24 and minute < 60:
+                            eta_string = f"{month:02d}-{day:02d} {hour:02d}:{minute:02d}"
+                        else:
+                            eta_string = f"{month:02d}-{day:02d}"
+                else:
+                    eta_string = str(eta_data)
+            
             # Update static data with comprehensive information
+            old_ship_type = self.vessels[mmsi].ship_type
             self.vessels[mmsi].update_static_data(
                 name=static_data.get("Name"),
                 destination=static_data.get("Destination"),
@@ -189,8 +257,12 @@ class AISClient:
                 dimension_to_stern=dimension_data.get("B"),
                 dimension_to_port=dimension_data.get("C"),
                 dimension_to_starboard=dimension_data.get("D"),
-                eta=static_data.get("Eta")
+                eta=eta_string
             )
+            
+            # Log when ship type is updated via static data
+            if ship_type is not None and old_ship_type != ship_type:
+                logger.debug(f"Static data updated ship_type for {mmsi} ({static_data.get('Name', 'Unknown')}): {old_ship_type} -> {ship_type}")
             
             # Calculate length and width from dimensions
             if dimension_data:
@@ -242,7 +314,12 @@ class AISClient:
             
             # Update ship type if available
             if position_data.get("ShipType"):
+                old_ship_type = self.vessels[mmsi].ship_type
                 self.vessels[mmsi].ship_type = position_data["ShipType"]
+                
+                # Log when ship type is updated
+                if old_ship_type != self.vessels[mmsi].ship_type:
+                    logger.debug(f"Updated ship_type for {mmsi}: {old_ship_type} -> {self.vessels[mmsi].ship_type}")
             
             # Call callback
             if self.on_position_update:

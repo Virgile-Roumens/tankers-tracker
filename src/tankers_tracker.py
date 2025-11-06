@@ -84,7 +84,9 @@ class TankersTracker:
                  auto_map_update_seconds: int = AUTO_MAP_UPDATE_SECONDS,
                  use_database: bool = USE_DATABASE_CACHE,
                  enable_concurrent: bool = ENABLE_CONCURRENT_PROCESSING,
-                 batch_size: int = MESSAGE_BATCH_SIZE):
+                 batch_size: int = MESSAGE_BATCH_SIZE,
+                 auto_open_browser: bool = False,
+                 setup_signal_handlers: bool = True):
         """
         Initialize Enhanced Tanker Tracker
         
@@ -96,6 +98,8 @@ class TankersTracker:
             use_database: Enable SQLite database for persistence
             enable_concurrent: Enable concurrent message processing
             batch_size: Messages to process per batch (concurrent mode)
+            auto_open_browser: Auto-open map in browser on initial generation
+            setup_signal_handlers: Setup Ctrl+C handlers (only works in main thread)
         """
         # Configuration
         self.selected_region = selected_region
@@ -105,6 +109,7 @@ class TankersTracker:
         self.use_database = use_database
         self.enable_concurrent = enable_concurrent
         self.batch_size = batch_size
+        self.auto_open_browser = auto_open_browser
         
         # Validate and set region bounds
         self._setup_region()
@@ -120,8 +125,9 @@ class TankersTracker:
         # Background thread handle
         self.auto_updater_thread: Optional[threading.Thread] = None
         
-        # Setup graceful shutdown
-        self._setup_signal_handlers()
+        # Setup graceful shutdown only if in main thread
+        if setup_signal_handlers:
+            self._setup_signal_handlers()
     
     def _setup_region(self) -> None:
         """Validate region and set bounding box coordinates."""
@@ -168,6 +174,65 @@ class TankersTracker:
         signal.signal(signal.SIGINT, signal_handler)
         if hasattr(signal, 'SIGTERM'):
             signal.signal(signal.SIGTERM, signal_handler)
+    
+    def _is_vessel_in_region(self, vessel: Vessel) -> bool:
+        """
+        Check if a vessel is within the current region bounds.
+        
+        Args:
+            vessel: Vessel to check
+            
+        Returns:
+            True if vessel is in region, False otherwise
+        """
+        if not vessel.has_position():
+            return False
+        
+        # Region bounds: [[south, west], [north, east]]
+        south, west = self.region_bounds[0]
+        north, east = self.region_bounds[1]
+        
+        # Check if vessel is within bounds
+        in_latitude = south <= vessel.lat <= north
+        in_longitude = west <= vessel.lon <= east
+        
+        return in_latitude and in_longitude
+    
+    def _get_vessels_in_region(self, expand_margin: float = 0.0) -> Dict[int, Vessel]:
+        """
+        Get only vessels that are currently in the tracked region.
+        
+        Args:
+            expand_margin: Degrees to expand the search area (for better coverage)
+        
+        Returns:
+            Dictionary of vessels in region
+        """
+        all_vessels = self.vessel_service.get_active_vessels()
+        
+        # Region bounds: [[south, west], [north, east]]
+        south, west = self.region_bounds[0]
+        north, east = self.region_bounds[1]
+        
+        # Expand bounds if requested
+        south -= expand_margin
+        north += expand_margin
+        west -= expand_margin
+        east += expand_margin
+        
+        vessels_in_region = {}
+        for mmsi, vessel in all_vessels.items():
+            if not vessel.has_position():
+                continue
+                
+            # Check if vessel is within bounds
+            in_latitude = south <= vessel.lat <= north
+            in_longitude = west <= vessel.lon <= east
+            
+            if in_latitude and in_longitude:
+                vessels_in_region[mmsi] = vessel
+        
+        return vessels_in_region
         
     def _on_static_data(self, vessel: Vessel):
         """Callback for when vessel static data is received."""
@@ -186,10 +251,13 @@ class TankersTracker:
             self._update_map()
     
     def _update_map(self):
-        """Update the map with current vessel positions."""
-        vessels = self.vessel_service.get_active_vessels()
+        """Update the map with current vessel positions (vessels in/near region)."""
+        vessels = self._get_vessels_in_region(expand_margin=0.5)  # Slightly expanded for updates
         if len(vessels) > 0:
             self.map_generator.generate_map(vessels, auto_open=False)
+            self.last_map_update = time.time()
+        else:
+            # If still no vessels, just update timestamp
             self.last_map_update = time.time()
     
     def _auto_map_updater(self):
@@ -199,146 +267,11 @@ class TankersTracker:
             
             # Only update if enough time has passed
             if time.time() - self.last_map_update > self.auto_map_update_seconds:
-                vessels = self.vessel_service.get_active_vessels()
+                vessels = self._get_vessels_in_region(expand_margin=0.5)
                 if len(vessels) > 0:
                     logger.info("[AUTO-UPDATE] Refreshing map...")
                     self.map_generator.generate_map(vessels, auto_open=False)
-                    self.last_map_update = time.time()
-    
-    async def _run_ais_client(self):
-        """Run the AIS client connection."""
-        self.ais_client = AISClient(
-            region_bounds=self.region_bounds,
-            max_vessels=self.max_tracked_ships,
-            on_static_data=self._on_static_data,
-            on_position_update=self._on_position_update,
-            batch_size=MESSAGE_BATCH_SIZE,
-            enable_concurrent_processing=self.enable_concurrent
-        )
-        
-        await self.ais_client.connect()
-    
-    def start(self):
-        """Start the tanker tracker application."""
-        self.running = True
-        
-        print("=" * 70)
-        print("🛢️  ENHANCED LIVE TANKER TRACKER")
-        print("=" * 70)
-        print(f"Region: {self.selected_region.upper()}")
-        print(f"Max vessels: {self.max_tracked_ships}")
-        print(f"Update interval: Every {self.update_interval} positions")
-        print(f"Auto-refresh: Every {self.auto_map_update_seconds} seconds")
-        print(f"Database caching: {'Enabled' if self.use_database else 'Disabled'}")
-        print(f"Concurrent processing: {'Enabled' if self.enable_concurrent else 'Disabled'}")
-        print("=" * 70 + "\n")
-        
-        # Show cached vessels if any
-        cached = self.vessel_service.get_all_vessels()
-        if len(cached) > 0:
-            logger.info(f"📚 Loaded {len(cached)} vessels from cache")
-        
-        # Create initial map
-        logger.info("Creating initial map...")
-        vessels = self.vessel_service.get_active_vessels()
-        self.map_generator.generate_map(vessels, auto_open=True)
-        
-        # Start background auto-updater thread
-        logger.info("Starting auto-updater thread...")
-        updater_thread = threading.Thread(target=self._auto_map_updater, daemon=True)
-        updater_thread.start()
-        
-        # Start AIS client
-        try:
-            logger.info("Starting AIS client...\n")
-            asyncio.run(self._run_ais_client())
-            
-        except KeyboardInterrupt:
-            self.stop()
-    
-    def stop(self):
-        """Stop the tanker tracker application."""
-        logger.info("\n⏹️  Stopping tracker...")
-        self.running = False
-        
-        # Get final statistics
-        stats = self.vessel_service.get_statistics()
-        
-        # Final map update
-        vessels = self.vessel_service.get_active_vessels()
-        self.map_generator.generate_map(vessels, auto_open=False)
-        
-        # Display statistics
-        print("\n" + "=" * 70)
-        print("📊 FINAL STATISTICS")
-        print("=" * 70)
-        print(f"Total vessels tracked: {stats.get('total_vessels', 0)}")
-        print(f"Active vessels: {stats.get('active_vessels', 0)}")
-        if 'database' in stats:
-            db_stats = stats['database']
-            print(f"Tankers in database: {db_stats.get('tankers', 0)}")
-            print(f"Vessels with position: {db_stats.get('with_position', 0)}")
-        print("=" * 70)
-        
-        # Close vessel service (saves to database)
-        self.vessel_service.close()
-        
-        logger.info("Tracker stopped")
-
-
-    
-    # =========================================================================
-    # AIS Data Callbacks
-    # =========================================================================
-    
-    def _on_vessel_static_data(self, vessel: Vessel) -> None:
-        """Handle vessel static data updates (name, dimensions, etc.)."""
-        try:
-            enriched_vessel = self.vessel_service.enrich_vessel_data(vessel)
-            self.vessel_service.update_vessel(enriched_vessel)
-        except Exception as e:
-            logger.error(f"Error processing static data for vessel {vessel.mmsi}: {e}")
-    
-    def _on_vessel_position_update(self, vessel: Vessel) -> None:
-        """Handle vessel position updates (GPS, speed, course, etc.)."""
-        try:
-            self.vessel_service.update_vessel(vessel)
-            self.position_update_count += 1
-            
-            if self.position_update_count % self.update_interval == 0:
-                self._trigger_map_update()
-        except Exception as e:
-            logger.error(f"Error processing position update for vessel {vessel.mmsi}: {e}")
-    
-    def _trigger_map_update(self) -> None:
-        """Trigger immediate map update if vessels are available."""
-        try:
-            active_vessels = self.vessel_service.get_active_vessels()
-            if len(active_vessels) > 0:
-                self.map_generator.generate_map(active_vessels, auto_open=False)
                 self.last_map_update = time.time()
-        except Exception as e:
-            logger.error(f"Error updating map: {e}")
-    
-    def _background_map_updater(self) -> None:
-        """Background thread for automatic map updates."""
-        logger.info("Background map updater started")
-        
-        while self.running:
-            try:
-                time.sleep(self.auto_map_update_seconds)
-                time_since_last = time.time() - self.last_map_update
-                
-                if time_since_last >= self.auto_map_update_seconds:
-                    active_vessels = self.vessel_service.get_active_vessels()
-                    if len(active_vessels) > 0:
-                        logger.info(f"[AUTO-UPDATE] Refreshing map with {len(active_vessels)} vessels")
-                        self.map_generator.generate_map(active_vessels, auto_open=False)
-                        self.last_map_update = time.time()
-            except Exception as e:
-                if self.running:
-                    logger.error(f"Background updater error: {e}")
-                break
     
     async def _run_ais_connection(self) -> None:
         """Run the AIS client connection with error handling."""
@@ -346,8 +279,8 @@ class TankersTracker:
             self.ais_client = AISClient(
                 region_bounds=self.region_bounds,
                 max_vessels=self.max_tracked_ships,
-                on_static_data=self._on_vessel_static_data,
-                on_position_update=self._on_vessel_position_update,
+                on_static_data=self._on_static_data,
+                on_position_update=self._on_position_update,
                 batch_size=self.batch_size,
                 enable_concurrent_processing=self.enable_concurrent
             )
@@ -400,23 +333,30 @@ Region bounds: {self.region_bounds}
             cached_vessels = self.vessel_service.get_all_vessels()
             if len(cached_vessels) > 0:
                 active_count = len([v for v in cached_vessels.values() if v.has_position()])
-                logger.info(f"📚 Loaded {len(cached_vessels):,} vessels from cache ({active_count:,} active)")
+                in_region_count = len(self._get_vessels_in_region())
+                logger.info(f"📚 Loaded {len(cached_vessels):,} vessels from cache ({active_count:,} active, {in_region_count:,} in current region)")
             else:
                 logger.info("No cached vessels found - starting fresh")
         except Exception as e:
             logger.warning(f"Failed to load cached vessels: {e}")
     
     def _create_initial_map(self) -> None:
-        """Create and display initial map."""
+        """Create and display initial map (showing vessels in region or nearby)."""
         try:
             logger.info("Creating initial map...")
-            active_vessels = self.vessel_service.get_active_vessels()
-            self.map_generator.generate_map(active_vessels, auto_open=True)
+            vessels_in_region = self._get_vessels_in_region()
             
-            if len(active_vessels) > 0:
-                logger.info(f"Initial map created with {len(active_vessels):,} vessels")
+            # If no vessels in exact region, expand search to show nearby vessels
+            if len(vessels_in_region) == 0:
+                logger.info("No vessels in exact region, expanding search area...")
+                vessels_in_region = self._get_vessels_in_region(expand_margin=2.0)  # Expand by 2 degrees
+            
+            self.map_generator.generate_map(vessels_in_region, auto_open=self.auto_open_browser)
+            
+            if len(vessels_in_region) > 0:
+                logger.info(f"Initial map created with {len(vessels_in_region):,} vessels in/near region")
             else:
-                logger.info("Initial map created with ports only - vessels will appear as data arrives")
+                logger.info("Initial map created with ports only - waiting for AIS data...")
         except Exception as e:
             logger.error(f"Failed to create initial map: {e}")
     
@@ -425,7 +365,7 @@ Region bounds: {self.region_bounds}
         try:
             logger.info("Starting background map updater...")
             self.auto_updater_thread = threading.Thread(
-                target=self._background_map_updater,
+                target=self._auto_map_updater,
                 name="MapUpdater",
                 daemon=True
             )
@@ -441,6 +381,10 @@ Region bounds: {self.region_bounds}
         logger.info("🛑 Stopping tanker tracker...")
         self.running = False
         
+        # Stop AIS client first
+        if self.ais_client and hasattr(self.ais_client, 'stop'):
+            self.ais_client.stop()
+        
         try:
             final_stats = self.vessel_service.get_statistics()
             self._generate_final_map()
@@ -452,12 +396,12 @@ Region bounds: {self.region_bounds}
         logger.info("✅ Tanker tracker stopped successfully")
     
     def _generate_final_map(self) -> None:
-        """Generate final map with all tracked vessels."""
+        """Generate final map with vessels in current region."""
         try:
-            active_vessels = self.vessel_service.get_active_vessels()
-            if len(active_vessels) > 0:
-                logger.info(f"Generating final map with {len(active_vessels):,} vessels...")
-                self.map_generator.generate_map(active_vessels, auto_open=False)
+            vessels_in_region = self._get_vessels_in_region()
+            if len(vessels_in_region) > 0:
+                logger.info(f"Generating final map with {len(vessels_in_region):,} vessels in region...")
+                self.map_generator.generate_map(vessels_in_region, auto_open=False)
         except Exception as e:
             logger.error(f"Failed to generate final map: {e}")
     
@@ -497,15 +441,74 @@ Region bounds: {self.region_bounds}
 
 def main():
     """Main entry point for the Enhanced Tanker Tracker application."""
+    import argparse
+    
+    parser = argparse.ArgumentParser(description="Enhanced Live Tanker Tracker")
+    parser.add_argument('--region', '-r', default=None, 
+                       help='Region to track (default: uses saved preference or suez_canal)')
+    parser.add_argument('--max-ships', type=int, default=10000,
+                       help='Maximum ships to track (default: 10000)')
+    parser.add_argument('--update-interval', type=int, default=5,
+                       help='Map update interval in position reports (default: 5)')
+    parser.add_argument('--auto-refresh', type=int, default=15,
+                       help='Auto-refresh interval in seconds (default: 15)')
+    parser.add_argument('--no-database', action='store_true',
+                       help='Disable database caching')
+    parser.add_argument('--no-concurrent', action='store_true',
+                       help='Disable concurrent processing')
+    parser.add_argument('--batch-size', type=int, default=10,
+                       help='Message batch size for concurrent processing (default: 10)')
+    parser.add_argument('--list-regions', action='store_true',
+                       help='List available regions and exit')
+    
+    args = parser.parse_args()
+    
+    # List regions if requested
+    if args.list_regions:
+        print("\n📍 Available Regions:")
+        print("=" * 50)
+        for region_code, bounds in REGIONS.items():
+            print(f"  {region_code:<20} {bounds}")
+        print("=" * 50)
+        return
+    
+    # Determine region to use
+    selected_region = args.region
+    if not selected_region:
+        # Try to load from saved preference
+        try:
+            from pathlib import Path
+            import json
+            region_file = Path("data/current_region.json")
+            if region_file.exists():
+                with open(region_file, 'r') as f:
+                    data = json.load(f)
+                    selected_region = data.get('region', 'suez_canal')
+                    logger.info(f"Using saved region preference: {selected_region}")
+            else:
+                selected_region = 'suez_canal'
+                logger.info(f"No saved preference found, using default: {selected_region}")
+        except Exception as e:
+            selected_region = 'suez_canal'
+            logger.warning(f"Failed to load region preference: {e}")
+            logger.info(f"Using default region: {selected_region}")
+    
+    # Validate region
+    if selected_region not in REGIONS:
+        logger.error(f"Invalid region: {selected_region}")
+        logger.info(f"Available regions: {', '.join(REGIONS.keys())}")
+        sys.exit(1)
+    
     try:
         tracker = TankersTracker(
-            selected_region="mediterranean",     # Focus region
-            max_tracked_ships=500,              # High capacity
-            update_interval=5,                  # Balanced updates
-            auto_map_update_seconds=15,         # Regular refresh
-            use_database=True,                  # Enable persistence
-            enable_concurrent=True,             # Enable performance
-            batch_size=10                       # Batch processing
+            selected_region=selected_region,
+            max_tracked_ships=args.max_ships,
+            update_interval=args.update_interval,
+            auto_map_update_seconds=args.auto_refresh,
+            use_database=not args.no_database,
+            enable_concurrent=not args.no_concurrent,
+            batch_size=args.batch_size,
+            auto_open_browser=True  # Auto-open for standalone usage
         )
         
         tracker.start()
