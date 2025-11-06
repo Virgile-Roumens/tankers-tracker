@@ -8,7 +8,8 @@ import os
 from utils.vessel_database import VesselDatabase
 from utils.vessel_info_service import VesselInfoService  
 from models.vessel import Vessel
-from config import TANKER_TYPES, DATABASE_PATH
+from config import DATABASE_PATH
+from enums.ship_type import ShipType
 
 # Set up logging
 logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
@@ -29,9 +30,9 @@ def test_ship_type_persistence():
     
     # Create test vessels with different ship types
     test_vessels = [
-        {"mmsi": 123456789, "name": "TEST TANKER", "ship_type": 80, "lat": 25.0, "lon": 55.0},
-        {"mmsi": 987654321, "name": "TEST CARGO", "ship_type": 70, "lat": 25.1, "lon": 55.1},
-        {"mmsi": 555666777, "name": "TEST CONTAINER", "ship_type": 71, "lat": 25.2, "lon": 55.2},
+        {"mmsi": 123456789, "name": "TEST TANKER", "ship_type": ShipType.TANKER, "lat": 25.0, "lon": 55.0},
+        {"mmsi": 987654321, "name": "TEST CARGO", "ship_type": ShipType.CARGO, "lat": 25.1, "lon": 55.1},
+        {"mmsi": 555666777, "name": "TEST CONTAINER", "ship_type": ShipType.CARGO_HAZARDOUS_A, "lat": 25.2, "lon": 55.2},
     ]
     
     # Add test vessels
@@ -68,18 +69,21 @@ def test_ship_type_persistence():
             actual_type = vessel.ship_type
             
             if actual_type == expected_type:
-                is_tanker = vessel.is_tanker(TANKER_TYPES)
+                is_tanker = vessel.is_tanker()
                 tanker_icon = "🛢️" if is_tanker else "🚢"
-                print(f"✅ {tanker_icon} {vessel.name}: Type {actual_type} (correct)")
+                type_display = actual_type.display_name if actual_type else "Unknown"
+                print(f"✅ {tanker_icon} {vessel.name}: {type_display} (correct)")
             else:
-                print(f"❌ {vessel.name}: Expected type {expected_type}, got {actual_type}")
+                expected_display = expected_type.display_name if expected_type else "Unknown"
+                actual_display = actual_type.display_name if actual_type else "Unknown"
+                print(f"❌ {vessel.name}: Expected {expected_display}, got {actual_display}")
                 success = False
         else:
             print(f"❌ Vessel {mmsi} not found after reload")
             success = False
     
     # Count tankers
-    tankers = [v for v in reloaded_vessels.values() if v.is_tanker(TANKER_TYPES)]
+    tankers = [v for v in reloaded_vessels.values() if v.is_tanker()]
     print(f"🛢️  Found {len(tankers)} tankers after reload")
     
     service2.close()

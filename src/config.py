@@ -34,8 +34,10 @@ MESSAGE_BATCH_SIZE = int(os.getenv("MESSAGE_BATCH_SIZE", "10"))  # Process messa
 USE_DATABASE_CACHE = os.getenv("USE_DATABASE_CACHE", "true").lower() == "true"
 DATABASE_PATH = os.getenv("DATABASE_PATH", "data/vessels.db")
 
-# Ship Type Definitions (IMO codes)
-TANKER_TYPES = list(range(70, 90))  # 70-89 are tanker/cargo vessel types
+# Ship Type Definitions - now using ShipType enum (see enums/ship_type.py)
+# Cargo vessels: IMO codes 70-79
+# Tankers: IMO codes 80-89
+# Use ShipType enum for type-safe ship classification
 
 # Regional Bounding Boxes [South-West Corner, North-East Corner]
 # Strategic tanker chokepoints and major oil shipping routes
@@ -252,16 +254,5 @@ MAP_ZOOM_LEVEL = 7
 PORT_MARKER_RADIUS = 8
 VESSEL_MARKER_RADIUS = 6
 
-# Ship Type Descriptions
-SHIP_TYPE_NAMES = {
-    70: "Cargo",
-    71: "Cargo - Hazardous A",
-    72: "Cargo - Hazardous B",
-    73: "Cargo - Hazardous C",
-    74: "Cargo - Hazardous D",
-    80: "Tanker",
-    81: "Tanker - Hazardous A",
-    82: "Tanker - Hazardous B",
-    83: "Tanker - Hazardous C",
-    84: "Tanker - Hazardous D",
-}
+# Ship Type Descriptions - now using ShipType enum (see enums/ship_type.py)
+# SHIP_TYPE_NAMES removed - use ShipType.display_name property instead

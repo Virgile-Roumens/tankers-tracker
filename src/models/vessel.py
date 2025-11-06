@@ -4,7 +4,10 @@ Vessel data model for representing tracked ships.
 
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Optional, List
+from typing import Optional, List, Union
+
+from enums.ship_type import ShipType
+from enums.navigational_status import NavigationalStatus
 
 
 @dataclass
@@ -62,14 +65,14 @@ class Vessel:
     course: Optional[float] = None
     heading: Optional[int] = None
     rot: Optional[float] = None
-    navigational_status: Optional[int] = None
+    navigational_status: Optional[NavigationalStatus] = None
     position_accuracy: Optional[int] = None
     
     # Static Vessel Data
     name: Optional[str] = None
     imo: Optional[int] = None
     callsign: Optional[str] = None
-    ship_type: Optional[int] = None
+    ship_type: Optional[ShipType] = None
     
     # Dimensions
     length: Optional[float] = None
@@ -94,7 +97,7 @@ class Vessel:
     
     def update_position(self, lat: float, lon: float, speed: Optional[float] = None, 
                        course: Optional[float] = None, heading: Optional[int] = None,
-                       rot: Optional[float] = None, navigational_status: Optional[int] = None,
+                       rot: Optional[float] = None, navigational_status: Optional[Union[int, NavigationalStatus]] = None,
                        position_accuracy: Optional[int] = None, timestamp: Optional[str] = None) -> None:
         """
         Update vessel position data.
@@ -121,7 +124,11 @@ class Vessel:
         if rot is not None:
             self.rot = round(rot, 2)
         if navigational_status is not None:
-            self.navigational_status = navigational_status
+            # Convert int to NavigationalStatus enum if needed
+            if isinstance(navigational_status, int):
+                self.navigational_status = NavigationalStatus.from_code(navigational_status)
+            else:
+                self.navigational_status = navigational_status
         if position_accuracy is not None:
             self.position_accuracy = position_accuracy
         
@@ -133,7 +140,7 @@ class Vessel:
     
     def update_static_data(self, name: Optional[str] = None, 
                           destination: Optional[str] = None,
-                          ship_type: Optional[int] = None,
+                          ship_type: Optional[Union[int, ShipType]] = None,
                           imo: Optional[int] = None,
                           callsign: Optional[str] = None,
                           length: Optional[float] = None,
@@ -150,7 +157,7 @@ class Vessel:
         Args:
             name: Vessel name
             destination: Destination port
-            ship_type: IMO ship type code
+            ship_type: IMO ship type code (int) or ShipType enum
             imo: IMO number
             callsign: Radio callsign
             length: Length overall
@@ -167,7 +174,11 @@ class Vessel:
         if destination:
             self.destination = destination.strip()
         if ship_type is not None:
-            self.ship_type = ship_type
+            # Convert int to ShipType enum if needed
+            if isinstance(ship_type, int):
+                self.ship_type = ShipType.from_code(ship_type)
+            else:
+                self.ship_type = ship_type
         if imo is not None:
             self.imo = imo
         if callsign:
@@ -193,9 +204,23 @@ class Vessel:
         """Check if vessel has valid position data."""
         return self.lat is not None and self.lon is not None
     
-    def is_tanker(self, tanker_types: list) -> bool:
-        """Check if vessel is a tanker type."""
-        return self.ship_type in tanker_types if self.ship_type else False
+    def is_tanker(self) -> bool:
+        """
+        Check if vessel is a tanker type.
+        
+        Returns:
+            bool: True if vessel is a tanker (IMO codes 70-89), False otherwise
+        """
+        return self.ship_type.is_tanker() if self.ship_type else False
+    
+    def get_ship_type_name(self) -> str:
+        """
+        Get human-readable ship type name.
+        
+        Returns:
+            str: Display name for ship type, or "Unknown" if not set
+        """
+        return self.ship_type.display_name if self.ship_type else "Unknown"
     
     def get_dimensions(self) -> str:
         """Get formatted vessel dimensions."""
@@ -204,26 +229,13 @@ class Vessel:
         return "Unknown"
     
     def get_navigational_status_text(self) -> str:
-        """Get human-readable navigation status."""
-        status_map = {
-            0: "Under way using engine",
-            1: "At anchor",
-            2: "Not under command",
-            3: "Restricted manoeuvrability",
-            4: "Constrained by draught",
-            5: "Moored",
-            6: "Aground",
-            7: "Engaged in fishing",
-            8: "Under way sailing",
-            9: "Reserved for HSC",
-            10: "Reserved for WIG",
-            11: "Reserved",
-            12: "Reserved",
-            13: "Reserved",
-            14: "AIS-SART",
-            15: "Not defined"
-        }
-        return status_map.get(self.navigational_status, "Unknown")
+        """
+        Get human-readable navigation status.
+        
+        Returns:
+            str: Display name for navigational status, or "Unknown" if not set
+        """
+        return self.navigational_status.display_name if self.navigational_status else "Unknown"
     
     def to_dict(self) -> dict:
         """Convert vessel to dictionary representation."""
@@ -238,10 +250,10 @@ class Vessel:
             "course": self.course,
             "heading": self.heading,
             "rot": self.rot,
-            "navigational_status": self.navigational_status,
+            "navigational_status": self.navigational_status.value if self.navigational_status else None,
             "destination": self.destination,
             "eta": self.eta,
-            "ship_type": self.ship_type,
+            "ship_type": self.ship_type.value if self.ship_type else None,
             "length": self.length,
             "width": self.width,
             "draught": self.draught,

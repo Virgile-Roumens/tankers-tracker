@@ -11,8 +11,9 @@ from typing import Dict, Callable, Optional, List
 import logging
 from collections import deque
 
-from config import AIS_API_KEY, AIS_URL, TANKER_TYPES
+from config import AIS_API_KEY, AIS_URL
 from models.vessel import Vessel
+from enums.ship_type import ShipType
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -281,8 +282,8 @@ class AISClient:
                 self.on_static_data(self.vessels[mmsi])
             
             # Log tanker types with more info
-            if ship_type in TANKER_TYPES:
-                vessel = self.vessels[mmsi]
+            vessel = self.vessels[mmsi]
+            if vessel.is_tanker():
                 dims = f"{vessel.get_dimensions()}" if vessel.length else "Unknown size"
                 logger.info(f"📋 ✅ TANKER {vessel.name} [{dims}] → {vessel.destination or 'Unknown'}")
     
@@ -327,7 +328,7 @@ class AISClient:
             
             # Log position with enhanced info
             vessel = self.vessels[mmsi]
-            is_tanker = "🛢️" if vessel.is_tanker(TANKER_TYPES) else "🚢"
+            is_tanker = "🛢️" if vessel.is_tanker() else "🚢"
             nav_status = vessel.get_navigational_status_text() if vessel.navigational_status is not None else "Unknown"
             
             logger.info(f"{is_tanker} {vessel.name or mmsi} | "
@@ -343,7 +344,7 @@ class AISClient:
         if time.time() - self.last_summary_time > 45:
             active = sum(1 for v in self.vessels.values() if v.has_position())
             tanker_count = sum(1 for v in self.vessels.values() 
-                             if v.has_position() and v.is_tanker(TANKER_TYPES))
+                             if v.has_position() and v.is_tanker())
             
             logger.info(f"\n{'='*70}")
             logger.info(f"📊 STATS: {active} vessels ({tanker_count} tankers)")

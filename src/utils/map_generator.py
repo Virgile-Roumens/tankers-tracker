@@ -11,11 +11,12 @@ import logging
 
 from config import (REGIONS, PORTS, MAP_TILES, MAP_ZOOM_LEVEL,
                    PORT_MARKER_RADIUS, VESSEL_MARKER_RADIUS,
-                   SHIP_TYPE_NAMES, TANKER_TYPES,
                    HTML_AUTO_REFRESH_SECONDS, ENABLE_AUTO_REFRESH,
                    PAUSE_ON_USER_ACTIVITY, USER_ACTIVITY_TIMEOUT)
 from models.vessel import Vessel
 from models.region import Port
+from enums.ship_type import ShipType
+from enums.region import Region
 
 logger = logging.getLogger(__name__)
 
@@ -139,7 +140,7 @@ class MapGenerator:
             
         else:
             # Fallback to basic display
-            ship_type_name = SHIP_TYPE_NAMES.get(vessel.ship_type, f"Type {vessel.ship_type}")
+            ship_type_name = vessel.get_ship_type_name()
             
             # Build comprehensive popup with all available data
             popup_html = f"""
@@ -212,8 +213,11 @@ class MapGenerator:
             if vessel.destination:
                 tooltip_text += f" → {vessel.destination}"
         
-        # Different color for tankers vs other vessels
-        color = 'darkred' if vessel.is_tanker(TANKER_TYPES) else 'orange'
+        # Get color based on ship type
+        if vessel.ship_type:
+            color = vessel.ship_type.get_color()
+        else:
+            color = '#808080'  # Gray for unknown type
         
         folium.CircleMarker(
             [vessel.lat, vessel.lon],
@@ -235,7 +239,7 @@ class MapGenerator:
             auto_open: Whether to automatically open the map in browser
         """
         active_count = sum(1 for v in vessels.values() if v.has_position())
-        tanker_count = sum(1 for v in vessels.values() if v.has_position() and v.is_tanker(TANKER_TYPES))
+        tanker_count = sum(1 for v in vessels.values() if v.has_position() and v.is_tanker())
         
         logger.info(f"\n🗺️  Generating map with {active_count} vessels ({tanker_count} tankers)...")
         
@@ -305,61 +309,22 @@ class MapGenerator:
         # Create region selector dropdown with organized categories
         region_options = []
         
-        # Organized region display with categories
-        region_categories = {
-            'MIDDLE EAST': {
-                'persian_gulf': '🛢️ Persian Gulf',
-                'strait_hormuz': '⚠️ Strait of Hormuz',
-                'red_sea': '� Red Sea',
-                'bab_el_mandeb': '⚠️ Bab el-Mandeb',
-            },
-            'SUEZ & MED': {
-                'suez_canal': '🇪🇬 Suez Canal',
-                'suez_north': '⬆️ Suez North',
-                'suez_south': '⬇️ Suez South',
-                'mediterranean_east': '�️ East Mediterranean',
-                'mediterranean_west': '🏖️ West Mediterranean',
-                'gibraltar': '🏔️ Gibraltar',
-            },
-            'SOUTHEAST ASIA': {
-                'malacca_strait': '⚠️ Malacca Strait',
-                'singapore_strait': '🇸🇬 Singapore',
-                'sunda_strait': '🌊 Sunda Strait',
-                'south_china_sea': '� South China Sea',
-            },
-            'AMERICAS': {
-                'us_gulf': '🇺🇸 US Gulf',
-                'caribbean': '🏝️ Caribbean',
-                'panama_canal': '🇵🇦 Panama Canal',
-                'venezuela_coast': '🇻🇪 Venezuela',
-                'brazil_coast': '🇧🇷 Brazil',
-            },
-            'EUROPE': {
-                'north_sea': '🌊 North Sea',
-                'english_channel': '🇬🇧 English Channel',
-                'baltic_sea': '❄️ Baltic Sea',
-                'norwegian_sea': '🇳🇴 Norwegian Sea',
-            },
-            'AFRICA': {
-                'west_africa': '🌍 West Africa',
-                'cape_good_hope': '🌊 Cape of Good Hope',
-                'east_africa': '🌍 East Africa',
-            },
-            'ASIA-PACIFIC': {
-                'japan_coast': '🇯🇵 Japan Coast',
-                'korea_strait': '🇰🇷 Korea Strait',
-                'taiwan_strait': '🇹🇼 Taiwan Strait',
-                'east_china_sea': '🌏 East China Sea',
-            }
-        }
+        # Build dropdown with optgroups using Region enum
+        # Group regions by category
+        categories_dict = {}
+        for region in Region:
+            category = region.category
+            if category not in categories_dict:
+                categories_dict[category] = []
+            categories_dict[category].append(region)
         
         # Build dropdown with optgroups
-        for category, regions in region_categories.items():
+        for category in sorted(categories_dict.keys()):
             region_options.append(f'<optgroup label="{category}">')
-            for region_code, display_name in regions.items():
-                if region_code in REGIONS:  # Only show if region exists in config
-                    selected = 'selected' if region_code == self.region_name else ''
-                    region_options.append(f'  <option value="{region_code}" {selected}>{display_name}</option>')
+            for region in categories_dict[category]:
+                if region.value in REGIONS:  # Only show if region exists in config
+                    selected = 'selected' if region.value == self.region_name else ''
+                    region_options.append(f'  <option value="{region.value}" {selected}>{region.display_name_with_emoji}</option>')
             region_options.append('</optgroup>')
         
         region_selector_html = f'''
