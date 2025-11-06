@@ -30,9 +30,14 @@ USER_ACTIVITY_TIMEOUT = int(os.getenv("USER_ACTIVITY_TIMEOUT", "5"))  # Seconds 
 
 # Performance Settings
 ENABLE_CONCURRENT_PROCESSING = os.getenv("ENABLE_CONCURRENT_PROCESSING", "true").lower() == "true"
-MESSAGE_BATCH_SIZE = int(os.getenv("MESSAGE_BATCH_SIZE", "10"))  # Process messages in batches
+MESSAGE_BATCH_SIZE = int(os.getenv("MESSAGE_BATCH_SIZE", "50"))  # Process messages in batches (increased from 10)
 USE_DATABASE_CACHE = os.getenv("USE_DATABASE_CACHE", "true").lower() == "true"
 DATABASE_PATH = os.getenv("DATABASE_PATH", "data/vessels.db")
+DATABASE_BATCH_SIZE = int(os.getenv("DATABASE_BATCH_SIZE", "100"))  # Batch database commits
+USE_ASYNC_DATABASE = os.getenv("USE_ASYNC_DATABASE", "true").lower() == "true"  # Use aiosqlite for async I/O
+
+# Worldwide Tracking Mode - ALWAYS ON (no regional fallback)
+MAX_TRACKED_SHIPS = int(os.getenv("MAX_TRACKED_SHIPS", "5000"))  # All worldwide vessels
 
 # Ship Type Definitions - now using ShipType enum (see enums/ship_type.py)
 # Cargo vessels: IMO codes 70-79

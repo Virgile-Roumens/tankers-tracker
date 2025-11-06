@@ -58,19 +58,14 @@ class MapGenerator:
         
     def create_base_map(self) -> folium.Map:
         """
-        Create a base Folium map centered on the region.
+        Create a worldwide Folium map (always).
         
         Returns:
             Folium Map object
         """
-        if self.region_name in REGIONS:
-            bounds = REGIONS[self.region_name]
-            center_lat = (bounds[0][0] + bounds[1][0]) / 2
-            center_lon = (bounds[0][1] + bounds[1][1]) / 2
-            zoom = MAP_ZOOM_LEVEL
-        else:
-            center_lat, center_lon = 20, 0
-            zoom = 3
+        # Worldwide: show entire world
+        center_lat, center_lon = 20, 0
+        zoom = 2
         
         m = folium.Map(
             location=[center_lat, center_lon],
@@ -251,37 +246,66 @@ class MapGenerator:
         title_html = self._create_map_interface(active_count, tanker_count)
         m.get_root().html.add_child(folium.Element(title_html))
         
+        # Add cache-busting meta tag to prevent stale map display
+        cache_bust_html = '''
+        <meta http-equiv="cache-control" content="no-cache, no-store, must-revalidate">
+        <meta http-equiv="pragma" content="no-cache">
+        <meta http-equiv="expires" content="0">
+        '''
+        m.get_root().html.add_child(folium.Element(cache_bust_html))
+        
         # Atomic file write to prevent blank page during refresh
         temp_file = f"{self.output_file}.tmp"
         try:
-            m.save(temp_file)
-            
-            # Atomic rename to final file (prevents reading partial file)
-            # Retry logic for Windows file locking issues
-            import os
             import time
-            max_retries = 5
-            retry_delay = 0.2  # Start with 200ms
+            max_retries = 10  # Increased from 5
+            retry_delay = 0.1  # Start with 100ms
+            last_error = None
             
+            # First, try to close any existing file handle
             for attempt in range(max_retries):
                 try:
+                    # Save to temp file
+                    m.save(temp_file)
+                    time.sleep(0.1)  # Let file system flush
+                    
+                    # Atomic rename to final file (prevents reading partial file)
+                    import os
                     if os.path.exists(self.output_file):
+                        # On Windows, we need to remove the target first
                         os.remove(self.output_file)
+                        time.sleep(0.05)  # Brief pause
+                    
                     os.rename(temp_file, self.output_file)
+                    time.sleep(0.05)  # Let file system confirm
                     break  # Success!
-                except (PermissionError, OSError) as e:
+                    
+                except (PermissionError, OSError, FileNotFoundError) as e:
+                    last_error = e
                     if attempt < max_retries - 1:
                         # File is locked, wait and retry
                         time.sleep(retry_delay)
-                        retry_delay *= 2  # Exponential backoff
+                        retry_delay *= 1.5  # Exponential backoff
+                        logger.debug(f"Retry {attempt + 1}/{max_retries}: {e}")
                     else:
                         # Last attempt failed, raise the error
                         raise
             
-            logger.info(f"✅ Map saved to {self.output_file}\n")
+            # Verify file was written correctly
+            import os
+            if os.path.exists(self.output_file):
+                file_size = os.path.getsize(self.output_file)
+                if file_size > 1000:  # Sanity check: HTML should be > 1KB
+                    logger.info(f"✅ Map saved to {self.output_file} ({file_size:,} bytes)\n")
+                else:
+                    logger.warning(f"⚠️  Map file seems small ({file_size} bytes), may be incomplete!")
+            else:
+                raise FileNotFoundError(f"Map file {self.output_file} not found after save!")
+                
         except Exception as e:
             logger.error(f"Failed to save map: {e}")
             # Clean up temp file if it exists
+            import os
             if os.path.exists(temp_file):
                 try:
                     os.remove(temp_file)
@@ -294,7 +318,7 @@ class MapGenerator:
     
     def _create_map_interface(self, active_count: int, tanker_count: int) -> str:
         """
-        Create the map interface HTML with auto-refresh functionality.
+        Create the map interface HTML with auto-refresh functionality (worldwide only).
         
         Args:
             active_count: Number of active vessels
@@ -306,36 +330,8 @@ class MapGenerator:
         refresh_status = "enabled" if ENABLE_AUTO_REFRESH else "disabled"
         refresh_interval = HTML_AUTO_REFRESH_SECONDS if ENABLE_AUTO_REFRESH else 0
         
-        # Create region selector dropdown with organized categories
-        region_options = []
-        
-        # Build dropdown with optgroups using Region enum
-        # Group regions by category
-        categories_dict = {}
-        for region in Region:
-            category = region.category
-            if category not in categories_dict:
-                categories_dict[category] = []
-            categories_dict[category].append(region)
-        
-        # Build dropdown with optgroups
-        for category in sorted(categories_dict.keys()):
-            region_options.append(f'<optgroup label="{category}">')
-            for region in categories_dict[category]:
-                if region.value in REGIONS:  # Only show if region exists in config
-                    selected = 'selected' if region.value == self.region_name else ''
-                    region_options.append(f'  <option value="{region.value}" {selected}>{region.display_name_with_emoji}</option>')
-            region_options.append('</optgroup>')
-        
-        region_selector_html = f'''
-        <div style="margin: 10px 0;">
-            <label style="font-size: 11px; font-weight: bold; display: block; margin-bottom: 3px;">📍 Strategic Region:</label>
-            <select id="region-selector" onchange="changeRegion()" 
-                    style="width: 100%; padding: 5px; font-size: 11px; border: 1px solid #ddd; border-radius: 3px; cursor: pointer;">
-                {''.join(region_options)}
-            </select>
-        </div>
-        '''
+        # No region selector - worldwide mode only
+        region_selector_html = ""
         
         # Create controls for auto-refresh
         controls_html = ""
@@ -471,28 +467,45 @@ class MapGenerator:
                         try {{
                             // Try cache-busting URL first
                             const currentUrl = window.location.href.split('?')[0].split('#')[0];
-                            const refreshUrl = currentUrl + '?refresh=' + Date.now();
+                            const timestamp = Date.now();
+                            const refreshUrl = currentUrl + '?_=' + timestamp + '&t=' + timestamp;
+                            
+                            console.log('Cache-busting refresh URL:', refreshUrl);
                             
                             // Test if we can fetch the file first (basic availability check)
-                            fetch(refreshUrl, {{ method: 'HEAD' }})
+                            fetch(refreshUrl, {{ 
+                                method: 'GET',
+                                cache: 'no-store',
+                                headers: {{
+                                    'Cache-Control': 'no-cache, no-store, must-revalidate',
+                                    'Pragma': 'no-cache',
+                                    'Expires': '0'
+                                }}
+                            }})
                                 .then(response => {{
+                                    console.log('Fetch response status:', response.status);
                                     if (response.ok) {{
+                                        console.log('File available, reloading with cache-bust');
                                         window.location.href = refreshUrl;
                                     }} else {{
-                                        throw new Error('File not available');
+                                        console.warn('File returned status ' + response.status);
+                                        throw new Error('File not available (status: ' + response.status + ')');
                                     }}
                                 }})
                                 .catch(error => {{
                                     console.warn('Fetch test failed, using standard reload:', error);
-                                    window.location.reload(true);
+                                    // Try standard reload with cache bust
+                                    window.location.href = currentUrl + '?_=' + Date.now();
                                 }});
                         }} catch (error) {{
                             console.error('Refresh failed:', error);
                             updateStatus('Refresh failed, retrying...', '#f44336');
                             // Fallback to standard reload
-                            setTimeout(() => window.location.reload(true), 1000);
+                            setTimeout(() => {{
+                                window.location.href = window.location.href.split('?')[0] + '?_=' + Date.now();
+                            }}, 1000);
                         }}
-                    }}, 750); // 750ms delay to allow file write completion
+                    }}, 1500); // Increased to 1500ms to allow file write completion
                 }}
                 
                 // Manual refresh with confirmation

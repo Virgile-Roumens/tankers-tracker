@@ -261,13 +261,15 @@ class TankersTracker:
             self.last_map_update = time.time()
     
     def _auto_map_updater(self):
-        """Background thread for automatic map updates."""
+        """Background thread for automatic map updates (worldwide)."""
         while self.running:
             time.sleep(self.auto_map_update_seconds)
             
             # Only update if enough time has passed
             if time.time() - self.last_map_update > self.auto_map_update_seconds:
-                vessels = self._get_vessels_in_region(expand_margin=0.5)
+                # Display all active vessels worldwide
+                vessels = self.vessel_service.get_active_vessels()
+                
                 if len(vessels) > 0:
                     logger.info("[AUTO-UPDATE] Refreshing map...")
                     self.map_generator.generate_map(vessels, auto_open=False)
@@ -312,17 +314,17 @@ class TankersTracker:
         """Display startup information and configuration."""
         banner = f"""
 {'=' * 75}
-🛢️  ENHANCED LIVE TANKER TRACKER v2.0
+🛢️  TANKER TRACKER v2.0 - WORLDWIDE MODE
 {'=' * 75}
 Configuration:
-  Region: {self.selected_region.upper().replace('_', ' ')}
+  Mode: 🌍 WORLDWIDE (All 30 regions)
   Max vessels: {self.max_tracked_ships:,}
   Update interval: Every {self.update_interval} positions
   Auto-refresh: Every {self.auto_map_update_seconds} seconds
   Database caching: {'✅ Enabled' if self.use_database else '❌ Disabled'}
   Concurrent processing: {'✅ Enabled' if self.enable_concurrent else '❌ Disabled'}
-  
-Region bounds: {self.region_bounds}
+
+Worldwide bounds: [-90, -180] to [90, 180]
 {'=' * 75}
 """
         print(banner)
@@ -341,22 +343,19 @@ Region bounds: {self.region_bounds}
             logger.warning(f"Failed to load cached vessels: {e}")
     
     def _create_initial_map(self) -> None:
-        """Create and display initial map (showing vessels in region or nearby)."""
+        """Create and display initial worldwide map."""
         try:
             logger.info("Creating initial map...")
-            vessels_in_region = self._get_vessels_in_region()
             
-            # If no vessels in exact region, expand search to show nearby vessels
-            if len(vessels_in_region) == 0:
-                logger.info("No vessels in exact region, expanding search area...")
-                vessels_in_region = self._get_vessels_in_region(expand_margin=2.0)  # Expand by 2 degrees
+            # Display all vessels worldwide
+            vessels_to_display = self.vessel_service.get_active_vessels()
             
-            self.map_generator.generate_map(vessels_in_region, auto_open=self.auto_open_browser)
+            self.map_generator.generate_map(vessels_to_display, auto_open=self.auto_open_browser)
             
-            if len(vessels_in_region) > 0:
-                logger.info(f"Initial map created with {len(vessels_in_region):,} vessels in/near region")
+            if len(vessels_to_display) > 0:
+                logger.info(f"Initial map created with {len(vessels_to_display):,} worldwide vessels")
             else:
-                logger.info("Initial map created with ports only - waiting for AIS data...")
+                logger.info("Initial map created - waiting for AIS data...")
         except Exception as e:
             logger.error(f"Failed to create initial map: {e}")
     
