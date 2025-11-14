@@ -239,22 +239,27 @@ class MapGenerator:
             vessels: Dictionary of vessels keyed by MMSI
             auto_open: Whether to automatically open the map in browser
         """
-        active_count = sum(1 for v in vessels.values() if v.has_position())
-        tanker_count = sum(1 for v in vessels.values() if v.has_position() and v.is_tanker())
+        # Count only UNIQUE vessels by MMSI
+        unique_mmsi = set(vessels.keys())
+        active_vessels = [v for v in vessels.values() if v.has_position()]
+        active_count = len(active_vessels)
+        tankers = [v for v in active_vessels if v.is_tanker()]
+        tanker_count = len(tankers)
         
-        logger.info(f"\n🗺️  Generating map with {active_count} vessels ({tanker_count} tankers)...")
+        # Debug logging
+        vessels_with_shiptype = sum(1 for v in active_vessels if v.ship_type is not None)
+        vessels_without_shiptype = active_count - vessels_with_shiptype
+        
+        logger.info(f"\n🗺️  Generating map with {active_count} unique vessels ({tanker_count} tankers)")
+        logger.info(f"   📊 Breakdown: {vessels_with_shiptype} with ship_type, {vessels_without_shiptype} WITHOUT ship_type data")
+        logger.info(f"   🛢️  Tankers identified: {tanker_count}")
         
         m = self.create_base_map()
         self.add_ports(m)
         self.add_vessels(m, vessels)
         
-        # Add CSS stylesheet link
-        css_link = '''
-        <!-- Try multiple relative paths so CSS loads regardless of where the HTML is written -->
-        <link rel="stylesheet" href="../static/styles.css?v=2.1">
-        <link rel="stylesheet" href="static/styles.css?v=2.1">
-        '''
-        m.get_root().html.add_child(folium.Element(css_link))
+        # CSS is embedded inline in _create_map_interface, so no external CSS link needed
+        # This prevents 404 errors when the static directory isn't accessible
         
         # Add auto-refresh functionality and statistics to map
         title_html = self._create_map_interface(active_count, tanker_count)
@@ -642,6 +647,91 @@ class MapGenerator:
             .control-panel.collapsed .action-buttons {{
                 display: none;
             }}
+            .search-bar {{
+                position: fixed;
+                bottom: 20px;
+                left: 10px;
+                z-index: 1100;
+                width: 360px;
+                border-radius: 6px;
+                background: rgba(255, 255, 255, 0.98);
+                backdrop-filter: blur(10px);
+                box-shadow: 0 4px 20px rgba(0,0,0,0.12);
+                border: 1px solid rgba(0,0,0,0.08);
+                font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', sans-serif;
+            }}
+            .search-header {{
+                background: linear-gradient(to bottom, rgba(249,250,251,1), rgba(255,255,255,1));
+                color: #1a1a1a;
+                padding: 14px 16px;
+                font-weight: 600;
+                font-size: 14px;
+                border-bottom: 1px solid rgba(0,0,0,0.08);
+                letter-spacing: -0.2px;
+            }}
+            .search-content {{
+                padding: 16px;
+            }}
+            .search-input-group {{
+                display: flex;
+                gap: 8px;
+                align-items: center;
+            }}
+            .search-input {{
+                flex: 1;
+                padding: 10px 14px;
+                border: 1px solid rgba(0,0,0,0.12);
+                border-radius: 5px;
+                font-size: 14px;
+                color: #1a1a1a;
+                background: white;
+                transition: all 0.2s;
+                font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', sans-serif;
+            }}
+            .search-input:focus {{
+                outline: none;
+                border-color: #2563eb;
+                box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
+            }}
+            .search-input::placeholder {{
+                color: #9ca3af;
+            }}
+            .search-btn {{
+                padding: 10px 20px;
+                border: none;
+                border-radius: 5px;
+                background: #2563eb;
+                color: white;
+                font-weight: 500;
+                font-size: 14px;
+                cursor: pointer;
+                transition: all 0.2s;
+                white-space: nowrap;
+            }}
+            .search-btn:hover {{
+                background: #1d4ed8;
+            }}
+            .search-btn:active {{
+                transform: scale(0.98);
+            }}
+            .search-message {{
+                margin-top: 12px;
+                padding: 10px;
+                border-radius: 5px;
+                font-size: 13px;
+                text-align: center;
+                display: none;
+            }}
+            .search-message.success {{
+                background: rgba(16, 185, 129, 0.1);
+                color: #059669;
+                border: 1px solid rgba(16, 185, 129, 0.2);
+            }}
+            .search-message.error {{
+                background: rgba(239, 68, 68, 0.1);
+                color: #dc2626;
+                border: 1px solid rgba(239, 68, 68, 0.2);
+            }}
         </style>
         <div class="control-panel" id="control-panel">
             <div class="control-panel-header">
@@ -740,11 +830,136 @@ class MapGenerator:
                 </div>
             </div>
         </div>
+        
+        <!-- Search Bar -->
+        <div class="search-bar" id="search-bar">
+            <div class="search-header">
+                Search by MMSI
+            </div>
+            <div class="search-content">
+                <div class="search-input-group">
+                    <input type="text" 
+                           id="mmsi-search-input" 
+                           class="search-input" 
+                           placeholder="Enter MMSI number...">
+                    <button id="mmsi-search-btn" class="search-btn">Search</button>
+                </div>
+                <div id="search-message" class="search-message"></div>
+            </div>
+        </div>
         '''
         
         # Add filter and basic JavaScript functionality
         filter_script = '''
         <script>
+            // Define searchByMMSI function - ROBUST IMPLEMENTATION
+            window.searchByMMSI = function() {
+                try {
+                    console.log('🔍 searchByMMSI called');
+                    const input = document.getElementById('mmsi-search-input');
+                    const messageDiv = document.getElementById('search-message');
+                    
+                    if (!input || !messageDiv) {
+                        console.error('❌ Search elements not found');
+                        return;
+                    }
+                    
+                    const mmsi = input.value.trim();
+                    console.log('📝 User entered MMSI:', mmsi);
+                    
+                    // Show loading
+                    messageDiv.style.display = 'none';
+                    messageDiv.className = 'search-message';
+                    
+                    if (!mmsi) {
+                        messageDiv.textContent = '⚠️ Please enter an MMSI number';
+                        messageDiv.className = 'search-message error';
+                        messageDiv.style.display = 'block';
+                        return;
+                    }
+                    
+                    if (!/^\\d+$/.test(mmsi)) {
+                        messageDiv.textContent = '⚠️ MMSI must be a number';
+                        messageDiv.className = 'search-message error';
+                        messageDiv.style.display = 'block';
+                        return;
+                    }
+                    
+                    const mmsiNum = parseInt(mmsi);
+                    console.log('🔢 Searching for MMSI:', mmsiNum);
+                    
+                    // Find the map
+                    const map = findLeafletMap();
+                    if (!map) {
+                        console.error('❌ Map not found');
+                        messageDiv.textContent = '❌ Map not ready - refresh page';
+                        messageDiv.className = 'search-message error';
+                        messageDiv.style.display = 'block';
+                        return;
+                    }
+                    
+                    // Search all markers
+                    let foundMarker = null;
+                    const markerCount = Object.keys(map._layers || {}).length;
+                    console.log('🗺️ Searching through', markerCount, 'layers');
+                    
+                    Object.values(map._layers || {}).forEach(layer => {
+                        if (layer && layer.options && layer.options.mmsi === mmsiNum) {
+                            foundMarker = layer;
+                            console.log('✅ Found marker!', mmsiNum);
+                        }
+                    });
+                    
+                    // Fallback: search popup content
+                    if (!foundMarker) {
+                        Object.values(map._layers || {}).forEach(layer => {
+                            if (layer && layer._popup && layer._popup._content) {
+                                const content = layer._popup._content.toString();
+                                if (content.includes('MMSI') && content.includes(mmsi)) {
+                                    foundMarker = layer;
+                                    if (layer.options) layer.options.mmsi = mmsiNum;
+                                    console.log('✅ Found via popup content:', mmsiNum);
+                                }
+                            }
+                        });
+                    }
+                    
+                    if (!foundMarker) {
+                        console.log('❌ Vessel not found:', mmsiNum);
+                        messageDiv.textContent = `❌ MMSI ${mmsi} not found`;
+                        messageDiv.className = 'search-message error';
+                        messageDiv.style.display = 'block';
+                        return;
+                    }
+                    
+                    // Show marker
+                    if (!map.hasLayer(foundMarker)) {
+                        foundMarker.addTo(map);
+                    }
+                    
+                    const latlng = foundMarker.getLatLng();
+                    console.log('📍 Zooming to:', latlng);
+                    
+                    map.setView(latlng, 13, {animate: true});
+                    
+                    if (foundMarker.openPopup) {
+                        foundMarker.openPopup();
+                    }
+                    
+                    messageDiv.textContent = `✅ Found MMSI: ${mmsi}`;
+                    messageDiv.className = 'search-message success';
+                    messageDiv.style.display = 'block';
+                    
+                    console.log('✨ Search complete');
+                    
+                    setTimeout(() => {
+                        messageDiv.style.display = 'none';
+                    }, 4000);
+                } catch (err) {
+                    console.error('🔴 Search error:', err);
+                }
+            };
+            
             // Global registry to store all vessel markers by MMSI (even when removed from map)
             // Format: { mmsi: marker_layer }
             window.allVesselMarkers = {};
@@ -1120,6 +1335,38 @@ class MapGenerator:
                 if (e.key === 'f' && e.ctrlKey && !document.activeElement.matches('input, textarea')) {
                     e.preventDefault();
                     toggleFilterPanel();
+                }
+            });
+            
+            
+            // Also set up event listeners for better compatibility
+            document.addEventListener('DOMContentLoaded', function() {
+                const searchBtn = document.getElementById('mmsi-search-btn');
+                const searchInput = document.getElementById('mmsi-search-input');
+                
+                if (searchBtn) {
+                    searchBtn.addEventListener('click', function(e) {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        console.log('Search button clicked');
+                        if (window.searchByMMSI) {
+                            window.searchByMMSI();
+                        } else {
+                            console.error('searchByMMSI function not found');
+                            alert('Search function not loaded. Please refresh the page.');
+                        }
+                    });
+                }
+                
+                if (searchInput) {
+                    searchInput.addEventListener('keypress', function(e) {
+                        if (e.key === 'Enter') {
+                            e.preventDefault();
+                            if (window.searchByMMSI) {
+                                window.searchByMMSI();
+                            }
+                        }
+                    });
                 }
             });
         </script>

@@ -209,7 +209,7 @@ class Vessel:
         Check if vessel is a tanker type.
         
         Returns:
-            bool: True if vessel is a tanker (IMO codes 70-89), False otherwise
+            bool: True if vessel is a tanker (IMO codes 80-89), False otherwise
         """
         return self.ship_type.is_tanker() if self.ship_type else False
     
