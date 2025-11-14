@@ -17,6 +17,7 @@ from models.vessel import Vessel
 from models.region import Port
 from enums.ship_type import ShipType
 from enums.region import Region
+from utils.enhanced_map_integration import EnhancedMapIntegration
 
 logger = logging.getLogger(__name__)
 
@@ -55,6 +56,9 @@ class MapGenerator:
         else:
             self.display_service = None
             self.region_manager = None
+        
+        # Initialize enhanced map integration (new features)
+        self.enhanced_integration = EnhancedMapIntegration()
         
     def create_base_map(self) -> folium.Map:
         """
@@ -208,23 +212,75 @@ class MapGenerator:
             if vessel.destination:
                 tooltip_text += f" → {vessel.destination}"
         
+        # ✨ NEW FEATURE: Enhance popup with geolocation information
+        popup_html = self.enhanced_integration.enhance_vessel_popup(vessel, popup_html)
+        
         # Get color based on ship type
         if vessel.ship_type:
             color = vessel.ship_type.get_color()
         else:
             color = '#808080'  # Gray for unknown type
         
-        # Create marker with MMSI stored in options for JavaScript tracking
-        marker = folium.CircleMarker(
-            [vessel.lat, vessel.lon],
-            radius=VESSEL_MARKER_RADIUS,
-            popup=folium.Popup(popup_html, max_width=350),  # Wider for enhanced display
-            tooltip=tooltip_text,
-            color=color,
-            fill=True,
-            fillColor=color,
-            fillOpacity=0.9
-        )
+        # ✨ NEW FEATURE: Create directional marker with arrow if vessel is moving
+        try:
+            if vessel.speed and vessel.speed > 0.5 and vessel.course is not None:
+                # Moving vessel - use arrow marker
+                heading = int(vessel.course) % 360
+                
+                # Create arrow SVG
+                arrow_svg = f'''
+                <svg width="24" height="24" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                    <g transform="rotate({heading} 12 12)">
+                        <polygon points="12,3 20,18 12,15 4,18" fill="{color}" stroke="white" stroke-width="1"/>
+                        <circle cx="12" cy="12" r="2" fill="white"/>
+                    </g>
+                </svg>
+                '''
+                
+                # Create marker with HTML icon
+                import base64
+                svg_bytes = arrow_svg.encode('utf-8')
+                svg_base64 = base64.b64encode(svg_bytes).decode('utf-8')
+                icon_uri = f"data:image/svg+xml;base64,{svg_base64}"
+                
+                icon = folium.features.CustomIcon(
+                    icon_image=icon_uri,
+                    icon_size=(24, 24),
+                    icon_anchor=(12, 12),
+                    popup_anchor=(0, -12)
+                )
+                
+                marker = folium.Marker(
+                    location=[vessel.lat, vessel.lon],
+                    popup=folium.Popup(popup_html, max_width=350),
+                    tooltip=tooltip_text,
+                    icon=icon
+                )
+            else:
+                # Stationary vessel - use circle marker
+                marker = folium.CircleMarker(
+                    [vessel.lat, vessel.lon],
+                    radius=VESSEL_MARKER_RADIUS,
+                    popup=folium.Popup(popup_html, max_width=350),
+                    tooltip=tooltip_text,
+                    color=color,
+                    fill=True,
+                    fillColor=color,
+                    fillOpacity=0.9
+                )
+        except Exception as e:
+            # Fallback to circle marker if arrow rendering fails
+            logger.debug(f"Arrow marker error for vessel {vessel.mmsi}: {e}")
+            marker = folium.CircleMarker(
+                [vessel.lat, vessel.lon],
+                radius=VESSEL_MARKER_RADIUS,
+                popup=folium.Popup(popup_html, max_width=350),
+                tooltip=tooltip_text,
+                color=color,
+                fill=True,
+                fillColor=color,
+                fillOpacity=0.9
+            )
         
         # Store MMSI in marker options for JavaScript identification (accessible via layer.options.mmsi)
         marker.options['mmsi'] = vessel.mmsi
@@ -239,6 +295,9 @@ class MapGenerator:
             vessels: Dictionary of vessels keyed by MMSI
             auto_open: Whether to automatically open the map in browser
         """
+        # ✨ NEW FEATURE: Initialize enhanced integration with current vessels
+        self.enhanced_integration.update_vessels(vessels)
+        
         # Count only UNIQUE vessels by MMSI
         unique_mmsi = set(vessels.keys())
         active_vessels = [v for v in vessels.values() if v.has_position()]
@@ -272,6 +331,37 @@ class MapGenerator:
         <meta http-equiv="expires" content="0">
         '''
         m.get_root().html.add_child(folium.Element(cache_bust_html))
+        
+        # ✨ NEW FEATURE: Analyze and report on unknown vessels
+        try:
+            analysis = self.enhanced_integration.analyze_unknown_vessels()
+            unknown_count = analysis.get('total_unknown', 0)
+            
+            if unknown_count > 0:
+                logger.warning(f"\n⚠️  UNKNOWN VESSELS DETECTED: {unknown_count} vessels without ship_type classification")
+                logger.warning(f"   These vessels need manual investigation or classification")
+                
+                # Show first few unknown vessels for quick reference
+                sample_vessels = analysis.get('vessels', [])[:3]
+                for vessel_info in sample_vessels:
+                    logger.info(f"      • MMSI {vessel_info['mmsi']}: {vessel_info.get('name', 'Unknown')} "
+                               f"({vessel_info.get('water_type', 'Unknown').replace('_', ' ').title()})")
+                
+                if len(analysis.get('vessels', [])) > 3:
+                    logger.info(f"      ... and {len(analysis['vessels']) - 3} more")
+            
+            # Get vessel statistics
+            stats = self.enhanced_integration.get_vessel_statistics()
+            logger.info(f"\n📊 VESSEL STATISTICS:")
+            logger.info(f"   Total vessels in database: {stats.get('total_vessels', 0)}")
+            logger.info(f"   Active (with position): {active_count}")
+            logger.info(f"   Stationary vessels: {stats.get('stationary', 0)}")
+            logger.info(f"   Fast-moving (>5 knots): {stats.get('moving', 0)}")
+            logger.info(f"   Tankers: {tanker_count}")
+            logger.info(f"   Unknown types: {unknown_count}\n")
+            
+        except Exception as e:
+            logger.debug(f"Enhanced analysis error (non-critical): {e}")
         
         # Atomic file write to prevent blank page during refresh
         temp_file = f"{self.output_file}.tmp"
