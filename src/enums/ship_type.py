@@ -118,14 +118,14 @@ class ShipType(IntEnum):
         """
         if self.is_tanker():
             if self.is_hazardous():
-                return '#8B0000'  # Dark red for hazardous tankers
-            return '#DC143C'  # Crimson for regular tankers
+                return '#b71c1c'  # Dark red for hazardous tankers
+            return '#d32f2f'  # Bright red for regular tankers
         elif self.is_cargo():
             if self.is_hazardous():
-                return '#FF6347'  # Tomato red for hazardous cargo
-            return '#FF8C00'  # Dark orange for regular cargo
+                return '#e65100'  # Dark orange for hazardous cargo
+            return '#1976d2'  # Blue for regular cargo
         else:
-            return '#4169E1'  # Royal blue for other vessels
+            return '#388e3c'  # Green for other vessels
     
     @classmethod
     def all_tanker_types(cls) -> Set['ShipType']:

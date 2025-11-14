@@ -256,8 +256,8 @@ PORTS: Dict[str, List[Dict]] = {
 # Map Display Settings
 MAP_TILES = "CartoDB positron"
 MAP_ZOOM_LEVEL = 7
-PORT_MARKER_RADIUS = 8
-VESSEL_MARKER_RADIUS = 6
+PORT_MARKER_RADIUS = 5  # Reduced from 8 for cleaner look
+VESSEL_MARKER_RADIUS = 3  # Reduced from 6 for smaller boat icons
 
 # Ship Type Descriptions - now using ShipType enum (see enums/ship_type.py)
 # SHIP_TYPE_NAMES removed - use ShipType.display_name property instead

@@ -214,7 +214,8 @@ class MapGenerator:
         else:
             color = '#808080'  # Gray for unknown type
         
-        folium.CircleMarker(
+        # Create marker with MMSI stored in options for JavaScript tracking
+        marker = folium.CircleMarker(
             [vessel.lat, vessel.lon],
             radius=VESSEL_MARKER_RADIUS,
             popup=folium.Popup(popup_html, max_width=350),  # Wider for enhanced display
@@ -223,7 +224,12 @@ class MapGenerator:
             fill=True,
             fillColor=color,
             fillOpacity=0.9
-        ).add_to(m)
+        )
+        
+        # Store MMSI in marker options for JavaScript identification (accessible via layer.options.mmsi)
+        marker.options['mmsi'] = vessel.mmsi
+        
+        marker.add_to(m)
     
     def generate_map(self, vessels: Dict[int, Vessel], auto_open: bool = False):
         """
@@ -241,6 +247,14 @@ class MapGenerator:
         m = self.create_base_map()
         self.add_ports(m)
         self.add_vessels(m, vessels)
+        
+        # Add CSS stylesheet link
+        css_link = '''
+        <!-- Try multiple relative paths so CSS loads regardless of where the HTML is written -->
+        <link rel="stylesheet" href="../static/styles.css?v=2.1">
+        <link rel="stylesheet" href="static/styles.css?v=2.1">
+        '''
+        m.get_root().html.add_child(folium.Element(css_link))
         
         # Add auto-refresh functionality and statistics to map
         title_html = self._create_map_interface(active_count, tanker_count)
@@ -330,51 +344,788 @@ class MapGenerator:
         refresh_status = "enabled" if ENABLE_AUTO_REFRESH else "disabled"
         refresh_interval = HTML_AUTO_REFRESH_SECONDS if ENABLE_AUTO_REFRESH else 0
         
-        # No region selector - worldwide mode only
-        region_selector_html = ""
-        
-        # Create controls for auto-refresh
-        controls_html = ""
-        if ENABLE_AUTO_REFRESH:
-            controls_html = f'''
-            <div style="margin-top: 10px; padding-top: 8px; border-top: 1px solid #ddd;">
-                <p id="refresh-timer" style="margin: 5px 0; font-size: 10px; color: #2196F3;">
-                    Auto-refresh in: <span id="countdown">{refresh_interval}</span>s
-                </p>
-                <div id="status-indicator" style="font-size: 9px; color: #4caf50; margin: 3px 0;">● Ready</div>
-                <button id="pause-btn" onclick="toggleAutoRefresh()" 
-                        style="background: #ff9800; color: white; border: none; padding: 2px 6px; 
-                               border-radius: 3px; font-size: 10px; cursor: pointer;">
-                    Pause
-                </button>
-                <button id="refresh-btn" onclick="manualRefresh()" 
-                        style="background: #4caf50; color: white; border: none; padding: 2px 6px; 
-                               border-radius: 3px; font-size: 10px; cursor: pointer; margin-left: 5px;">
-                    Refresh Now
-                </button>
+        # Modern control panel HTML
+        # Include minimal inline CSS to guarantee floating overlays even if external CSS fails to load
+        title_html = f'''
+        <style>
+            /* Ensure map fills screen and overlays float */
+            html, body {{ margin: 0; padding: 0; height: 100%; }}
+            #map {{ position: absolute; top: 0; left: 0; height: 100%; width: 100%; }}
+            .control-panel {{
+                position: fixed;
+                    top: 10px; 
+                right: 10px;
+                z-index: 1000;
+                    width: 320px; 
+                border-radius: 6px;
+                background: rgba(255, 255, 255, 0.98);
+                backdrop-filter: blur(10px);
+                color: #1a1a1a;
+                padding: 0;
+                box-shadow: 0 4px 20px rgba(0,0,0,0.12);
+                border: 1px solid rgba(0,0,0,0.08);
+                font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', sans-serif;
+            }}
+            .control-panel-header {{
+                padding: 14px 16px;
+                border-bottom: 1px solid rgba(0,0,0,0.08);
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+                background: linear-gradient(to bottom, rgba(249,250,251,1), rgba(255,255,255,1));
+            }}
+            .control-panel-title {{
+                font-size: 14px;
+                font-weight: 600;
+                color: #1a1a1a;
+                letter-spacing: -0.2px;
+            }}
+            .filter-panel {{
+                position: fixed;
+                top: 130px;
+                right: 10px;
+                z-index: 1100;
+                width: 320px;
+                max-height: calc(100vh - 380px);
+                overflow-y: auto;
+                border-radius: 6px;
+                background: rgba(255, 255, 255, 0.98);
+                backdrop-filter: blur(10px);
+                box-shadow: 0 4px 20px rgba(0,0,0,0.12);
+                border: 1px solid rgba(0,0,0,0.08);
+                display: none;
+            }}
+            .filter-panel.visible {{
+                display: block;
+            }}
+            .filter-header {{
+                background: linear-gradient(to bottom, rgba(249,250,251,1), rgba(255,255,255,1));
+                color: #1a1a1a;
+                padding: 14px 16px;
+                font-weight: 600;
+                font-size: 14px;
+                border-bottom: 1px solid rgba(0,0,0,0.08);
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+                letter-spacing: -0.2px;
+            }}
+            .filter-content {{
+                padding: 16px;
+            }}
+            .filter-group {{
+                margin-bottom: 16px;
+            }}
+            .filter-group:last-of-type {{
+                margin-bottom: 0;
+            }}
+            .filter-group-title {{
+                font-weight: 600;
+                font-size: 10px;
+                color: #6b7280;
+                text-transform: uppercase;
+                margin-bottom: 10px;
+                letter-spacing: 0.8px;
+            }}
+            .filter-option {{
+                display: flex;
+                align-items: center;
+                gap: 10px;
+                margin-bottom: 8px;
+                padding: 4px 0;
+            }}
+            .filter-option label {{
+                font-size: 14px;
+                cursor: pointer;
+                flex: 1;
+                color: #374151;
+                font-weight: 400;
+            }}
+            .filter-option input[type="checkbox"] {{
+                cursor: pointer;
+                width: 18px;
+                height: 18px;
+                accent-color: #2563eb;
+            }}
+            .filter-buttons {{
+                display: flex;
+                gap: 8px;
+                padding: 16px;
+                background: rgba(249,250,251,0.5);
+                border-top: 1px solid rgba(0,0,0,0.06);
+                margin: 0 -16px -16px -16px;
+                border-radius: 0 0 6px 6px;
+            }}
+            .filter-buttons button {{
+                flex: 1;
+                padding: 10px 16px;
+                border: none;
+                    border-radius: 5px;
+                font-weight: 500;
+                cursor: pointer;
+                font-size: 13px;
+                transition: all 0.2s;
+            }}
+            .filter-buttons button:first-child {{
+                background: #2563eb;
+                color: white;
+            }}
+            .filter-buttons button:first-child:hover {{
+                background: #1d4ed8;
+            }}
+            .filter-buttons button:last-child {{
+                background: rgba(0,0,0,0.05);
+                color: #374151;
+            }}
+            .filter-buttons button:last-child:hover {{
+                background: rgba(0,0,0,0.08);
+            }}
+            .legend {{
+                position: fixed;
+                bottom: 20px;
+                right: 10px;
+                z-index: 1100;
+                border-radius: 6px;
+                background: rgba(255, 255, 255, 0.98);
+                backdrop-filter: blur(10px);
+                box-shadow: 0 4px 20px rgba(0,0,0,0.12);
+                border: 1px solid rgba(0,0,0,0.08);
+                width: 320px;
+            }}
+            .legend-header {{
+                background: linear-gradient(to bottom, rgba(249,250,251,1), rgba(255,255,255,1));
+                color: #1a1a1a;
+                padding: 14px 16px;
+                font-weight: 600;
+                font-size: 14px;
+                border-bottom: 1px solid rgba(0,0,0,0.08);
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+                cursor: pointer;
+                letter-spacing: -0.2px;
+            }}
+            .legend-content {{
+                padding: 16px;
+                display: block;
+            }}
+            .legend-content.collapsed {{
+                display: none;
+            }}
+            .legend-dot {{
+                display: inline-block;
+                width: 10px;
+                height: 10px;
+                border-radius: 50%;
+                margin-right: 10px;
+                border: 2px solid rgba(0,0,0,0.1);
+            }}
+            .legend-item {{
+                display: flex;
+                align-items: center;
+                margin-bottom: 10px;
+                font-size: 13px;
+                color: #374151;
+            }}
+            .legend-item:last-child {{
+                margin-bottom: 0;
+            }}
+            .panel-toggle {{
+                background: transparent;
+                border: none;
+                color: #6b7280;
+                font-size: 16px;
+                line-height: 1;
+                padding: 4px 8px;
+                border-radius: 4px;
+                cursor: pointer;
+                transition: all 0.2s;
+            }}
+            .panel-toggle:hover {{
+                background: rgba(0,0,0,0.05);
+                color: #1a1a1a;
+            }}
+            .stats-row {{
+                display: flex;
+                gap: 16px;
+                padding: 14px 16px;
+                border-bottom: 1px solid rgba(0,0,0,0.06);
+            }}
+            .stat-item {{
+                flex: 1;
+            }}
+            .stat-label {{
+                font-size: 10px;
+                text-transform: uppercase;
+                color: #6b7280;
+                font-weight: 600;
+                letter-spacing: 0.8px;
+                margin-bottom: 4px;
+            }}
+            .stat-value {{
+                font-size: 20px;
+                font-weight: 700;
+                color: #1a1a1a;
+                letter-spacing: -0.5px;
+            }}
+            .status-row {{
+                display: flex;
+                align-items: center;
+                justify-content: space-between;
+                padding: 12px 16px;
+                border-bottom: 1px solid rgba(0,0,0,0.06);
+            }}
+            .status-badge {{
+                display: flex;
+                align-items: center;
+                gap: 6px;
+                font-size: 12px;
+                color: #374151;
+            }}
+            .status-dot {{
+                width: 6px;
+                height: 6px;
+                border-radius: 50%;
+                background: #10b981;
+                animation: pulse 2s infinite;
+            }}
+            @keyframes pulse {{
+                0%, 100% {{ opacity: 1; }}
+                50% {{ opacity: 0.5; }}
+            }}
+            .action-buttons {{
+                display: flex;
+                gap: 8px;
+                padding: 12px 16px;
+            }}
+            .btn {{
+                flex: 1;
+                padding: 8px 12px;
+                border: none;
+                border-radius: 5px;
+                font-weight: 500;
+                cursor: pointer;
+                font-size: 12px;
+                transition: all 0.2s;
+                text-align: center;
+            }}
+            .btn-primary {{
+                background: #2563eb;
+                color: white;
+            }}
+            .btn-primary:hover {{
+                background: #1d4ed8;
+            }}
+            .btn-secondary {{
+                background: rgba(0,0,0,0.05);
+                color: #374151;
+            }}
+            .btn-secondary:hover {{
+                background: rgba(0,0,0,0.08);
+            }}
+            .btn-warning {{
+                background: #f59e0b;
+                color: white;
+            }}
+            .btn-warning:hover {{
+                background: #d97706;
+            }}
+            .btn-success {{
+                background: #10b981;
+                color: white;
+            }}
+            .btn-success:hover {{
+                background: #059669;
+            }}
+            .control-panel.collapsed .stats-row,
+            .control-panel.collapsed .status-row,
+            .control-panel.collapsed .action-buttons {{
+                display: none;
+            }}
+        </style>
+        <div class="control-panel" id="control-panel">
+            <div class="control-panel-header">
+                <div class="control-panel-title">Strategic Tanker Tracker</div>
+                <button class="panel-toggle" onclick="toggleControlPanel()" title="Toggle panel">−</button>
+        </div>
+            
+            <div class="stats-row">
+                <div class="stat-item">
+                    <div class="stat-label">Active Vessels</div>
+                    <div class="stat-value">{active_count}</div>
+                </div>
+                <div class="stat-item">
+                    <div class="stat-label">Tankers</div>
+                    <div class="stat-value" style="color: #dc2626;">{tanker_count}</div>
+                </div>
             </div>
+            
+            <div class="status-row">
+                <div class="status-badge">
+                    <div class="status-dot"></div>
+                    <span>Live Tracking</span>
+                </div>
+                <button class="btn btn-secondary" style="flex: 0; padding: 6px 12px;" onclick="toggleFilterPanel()" title="Toggle filters">Filters</button>
+            </div>
+            
+            <div class="action-buttons">
+        '''
+        
+        if ENABLE_AUTO_REFRESH:
+            title_html += f'''
+                <button id="pause-btn" class="btn btn-warning" onclick="toggleAutoRefresh()" title="Pause auto-refresh">Pause</button>
+                <button id="refresh-btn" class="btn btn-success" onclick="manualRefresh()" title="Refresh now">Refresh</button>
             '''
         
-        title_html = f'''
-        <div style="position: fixed; 
-                    top: 10px; 
-                    left: 50px; 
-                    width: 320px; 
-                    background-color: white; 
-                    border: 2px solid grey; 
-                    z-index: 9999; 
-                    padding: 10px;
-                    border-radius: 5px;
-                    box-shadow: 0 0 10px rgba(0,0,0,0.3);">
-            <h4 style="margin: 0 0 10px 0;">🛢️ Strategic Tanker Tracker</h4>
-            {region_selector_html}
-            <p style="margin: 5px 0; font-size: 12px;"><b>Active Vessels:</b> {active_count}</p>
-            <p style="margin: 5px 0; font-size: 12px;"><b>🛢️ Tankers:</b> <span style="color: darkred; font-weight: bold;">{tanker_count}</span></p>
-            <p style="margin: 5px 0; font-size: 10px; color: gray;">Last updated: {datetime.now().strftime("%H:%M:%S")}</p>
-            <p style="margin: 5px 0; font-size: 10px; color: gray;">Auto-refresh: {refresh_status}</p>
-            {controls_html}
+        title_html += '''
+            </div>
+        </div>
+        
+        <!-- Filter Panel -->
+        <div class="filter-panel" id="filter-panel">
+            <div class="filter-header">
+                Filter Vessels
+                <button class="panel-toggle" onclick="toggleFilterPanel()" title="Close">✕</button>
+            </div>
+            <div class="filter-content">
+                <!-- Vessel Type Filter -->
+                <div class="filter-group">
+                    <div class="filter-group-title">Vessel Type</div>
+                    <div class="filter-option">
+                        <input type="checkbox" id="filter-tankers" checked>
+                        <label for="filter-tankers">Oil Tankers</label>
+                    </div>
+                    <div class="filter-option">
+                        <input type="checkbox" id="filter-cargo" checked>
+                        <label for="filter-cargo">Cargo Ships</label>
+                    </div>
+                    <div class="filter-option">
+                        <input type="checkbox" id="filter-other" checked>
+                        <label for="filter-other">Other Vessels</label>
+                    </div>
+                </div>
+                
+                <!-- Note: Additional filters removed - vessel metadata not available in current implementation -->
+                
+                <!-- Action Buttons -->
+                <div class="filter-buttons">
+                    <button class="filter-btn filter-btn-apply" onclick="applyFilters()">Apply</button>
+                    <button class="filter-btn filter-btn-reset" onclick="resetFilters()">Reset</button>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Legend -->
+        <div class="legend" id="legend">
+            <div class="legend-header" onclick="toggleLegend()">
+                Legend
+                <button class="panel-toggle" onclick="event.stopPropagation(); toggleLegend();" title="Toggle legend">−</button>
+            </div>
+            <div class="legend-content" id="legend-content">
+                <div class="legend-item">
+                    <span class="legend-dot" style="background: #d32f2f;"></span>
+                    <span>Oil Tanker</span>
+                </div>
+                <div class="legend-item">
+                    <span class="legend-dot" style="background: #1976d2;"></span>
+                    <span>Cargo Ship</span>
+                </div>
+                <div class="legend-item">
+                    <span class="legend-dot" style="background: #388e3c;"></span>
+                    <span>Other Vessel</span>
+                </div>
+                <div class="legend-item">
+                    <span class="legend-dot" style="background: #64b5f6;"></span>
+                    <span>Port Terminal</span>
+                </div>
+            </div>
         </div>
         '''
+        
+        # Add filter and basic JavaScript functionality
+        filter_script = '''
+        <script>
+            // Global registry to store all vessel markers by MMSI (even when removed from map)
+            // Format: { mmsi: marker_layer }
+            window.allVesselMarkers = {};
+            
+            // Store map reference globally when page loads
+            window.addEventListener('load', function() {
+                setTimeout(function() {
+                    // Find the map object in the global scope
+                    for (let key in window) {
+                        try {
+                            if (window[key] && window[key]._layers && typeof window[key].addLayer === 'function') {
+                                window.globalMapObject = window[key];
+                                console.log('✅ Map object found and stored globally:', key);
+                                
+                                // Clear and re-initialize marker registry with all current markers
+                                window.allVesselMarkers = {};
+                                const map = window.globalMapObject;
+                                
+                                // First, remove any duplicate markers by MMSI
+                                const mmsiMap = new Map();
+                                const layersToRemove = [];
+                                
+                                Object.values(map._layers).forEach(layer => {
+                                    if (layer instanceof L.CircleMarker) {
+                                        const mmsi = layer.options?.mmsi;
+                                        const color = layer.options.color?.toLowerCase() || '';
+                                        
+                                        // Only process vessel markers, not ports
+                                        if (!(color === 'blue' || color.includes('#64b5f6') || color.includes('lightblue'))) {
+                                            if (mmsi) {
+                                                // If we already have a marker for this MMSI, mark the duplicate for removal
+                                                if (mmsiMap.has(mmsi)) {
+                                                    layersToRemove.push(layer);
+                                                } else {
+                                                    mmsiMap.set(mmsi, layer);
+                                                    window.allVesselMarkers[mmsi] = layer;
+                                                }
+                                            } else {
+                                                // Marker without MMSI - register it but log a warning
+                                                console.warn('Marker found without MMSI:', layer);
+                                                window.allVesselMarkers['unknown_' + Object.keys(window.allVesselMarkers).length] = layer;
+                                            }
+                                        }
+                                    }
+                                });
+                                
+                                // Remove duplicate markers
+                                layersToRemove.forEach(layer => {
+                                    if (map.hasLayer(layer)) {
+                                        map.removeLayer(layer);
+                                    }
+                                });
+                                
+                                if (layersToRemove.length > 0) {
+                                    console.log('🗑️ Removed ' + layersToRemove.length + ' duplicate markers');
+                                }
+                                
+                                // Post-process: Extract MMSI from popup content if not in options
+                                // This handles cases where Folium didn't serialize the custom option
+                                Object.values(window.allVesselMarkers).forEach(layer => {
+                                    if (!layer.options.mmsi && layer._popup) {
+                                        try {
+                                            const popupContent = layer._popup._content;
+                                            // Try to extract MMSI from popup HTML (look for "MMSI:</td><td>123456789")
+                                            const mmsiMatch = popupContent.match(/MMSI[^>]*>[\s]*(\d+)/i);
+                                            if (mmsiMatch && mmsiMatch[1]) {
+                                                layer.options.mmsi = parseInt(mmsiMatch[1]);
+                                                console.log('Extracted MMSI from popup:', layer.options.mmsi);
+                                            }
+                                        } catch (e) {
+                                            // Ignore errors
+                                        }
+                                    }
+                                });
+                                
+                                console.log('✅ Registered ' + Object.keys(window.allVesselMarkers).length + ' unique vessel markers');
+                                break;
+                            }
+                        } catch (e) {
+                            // Skip cross-origin errors
+                        }
+                    }
+                }, 500); // Small delay to ensure map is initialized
+            });
+            
+            // Panel Management
+            function toggleControlPanel() {
+                const panel = document.getElementById('control-panel');
+                const btn = panel.querySelector('.panel-toggle');
+                if (panel.classList.contains('collapsed')) {
+                    panel.classList.remove('collapsed');
+                    if (btn) btn.textContent = '−';
+                } else {
+                    panel.classList.add('collapsed');
+                    if (btn) btn.textContent = '+';
+                }
+            }
+            
+            function toggleFilterPanel() {
+                const panel = document.getElementById('filter-panel');
+                if (panel) {
+                    panel.classList.toggle('visible');
+                }
+            }
+            
+            function toggleLegend() {
+                const content = document.getElementById('legend-content');
+                const btn = document.querySelector('#legend .panel-toggle');
+                if (content.classList.contains('collapsed')) {
+                    content.classList.remove('collapsed');
+                    if (btn) btn.textContent = '−';
+                } else {
+                    content.classList.add('collapsed');
+                    if (btn) btn.textContent = '+';
+                }
+            }
+            
+            // Apply filters
+            function applyFilters() {
+                const filters = {
+                    tankers: document.getElementById('filter-tankers')?.checked ?? true,
+                    cargo: document.getElementById('filter-cargo')?.checked ?? true,
+                    other: document.getElementById('filter-other')?.checked ?? true
+                };
+                
+                // Save filters to localStorage
+                localStorage.setItem('vesselFilters', JSON.stringify(filters));
+                
+                // Apply filter visibility to Folium markers
+                applyMarkerFilters(filters);
+                
+                console.log('Filters applied:', filters);
+            }
+            
+            // Reset filters
+            function resetFilters() {
+                document.getElementById('filter-tankers').checked = true;
+                document.getElementById('filter-cargo').checked = true;
+                document.getElementById('filter-other').checked = true;
+                
+                localStorage.removeItem('vesselFilters');
+                console.log('Filters reset to defaults');
+                
+                // Apply the reset filters (show all)
+                applyFilters();
+            }
+            
+            // Find the Leaflet map instance
+            function findLeafletMap() {
+                // Method 1: Use the globally stored map object
+                if (window.globalMapObject) {
+                    return window.globalMapObject;
+                }
+                
+                // Method 2: Search window properties for map objects
+                for (let key in window) {
+                    try {
+                        if (window[key] && window[key]._layers && typeof window[key].addLayer === 'function') {
+                            console.log('Found map via window search:', key);
+                            window.globalMapObject = window[key]; // Cache it
+                            return window[key];
+                        }
+                    } catch (e) {
+                        // Skip inaccessible properties (cross-origin)
+                        continue;
+                    }
+                }
+                
+                // Method 3: Find map div and search its associated map
+                const mapDivs = document.querySelectorAll('.folium-map');
+                for (let div of mapDivs) {
+                    if (div._leaflet_id) {
+                        // Search for map with matching ID
+                        for (let key in window) {
+                            try {
+                                if (window[key] && window[key]._container === div) {
+                                    console.log('Found map via container match:', key);
+                                    window.globalMapObject = window[key]; // Cache it
+                                    return window[key];
+                                }
+                            } catch (e) {
+                                continue;
+                            }
+                        }
+                    }
+                }
+                
+                console.error('Could not find map object in any method');
+                return null;
+            }
+            
+            // Apply marker filters
+            function applyMarkerFilters(filters) {
+                try {
+                    const map = findLeafletMap();
+                    
+                    if (!map) {
+                        console.error('Could not find Leaflet map instance');
+                        alert('Map not found. Please refresh the page and try again.');
+                        return;
+                    }
+                    
+                    // Initialize marker registry if not already done
+                    if (!window.allVesselMarkers || Object.keys(window.allVesselMarkers).length === 0) {
+                        window.allVesselMarkers = {};
+                        Object.values(map._layers).forEach(layer => {
+                            if (layer instanceof L.CircleMarker) {
+                                const mmsi = layer.options?.mmsi;
+                                const color = layer.options.color?.toLowerCase() || '';
+                                // Only store vessel markers, not ports
+                                if (!(color === 'blue' || color.includes('#64b5f6') || color.includes('lightblue'))) {
+                                    if (mmsi) {
+                                        window.allVesselMarkers[mmsi] = layer;
+                                    }
+                                }
+                            }
+                        });
+                        console.log('Initialized marker registry with ' + Object.keys(window.allVesselMarkers).length + ' markers');
+                    }
+                    
+                    // Remove any duplicate markers currently on the map (by MMSI)
+                    const mmsiOnMap = new Map();
+                    Object.values(map._layers).forEach(layer => {
+                        if (layer instanceof L.CircleMarker) {
+                            const mmsi = layer.options?.mmsi;
+                            const color = layer.options.color?.toLowerCase() || '';
+                            if (mmsi && !(color === 'blue' || color.includes('#64b5f6') || color.includes('lightblue'))) {
+                                if (mmsiOnMap.has(mmsi)) {
+                                    // Duplicate found - remove the older one (keep the one already in registry)
+                                    const existingLayer = mmsiOnMap.get(mmsi);
+                                    if (map.hasLayer(existingLayer)) {
+                                        map.removeLayer(existingLayer);
+                                    }
+                                }
+                                mmsiOnMap.set(mmsi, layer);
+                            }
+                        }
+                    });
+                    
+                    console.log('Found map with ' + Object.keys(map._layers).length + ' layers');
+                    console.log('Registry has ' + Object.keys(window.allVesselMarkers).length + ' vessel markers');
+                    console.log('Filters being applied:', filters);
+                    
+                    let hiddenCount = 0;
+                    let shownCount = 0;
+                    let portCount = 0;
+                    let tankerCount = 0;
+                    let cargoCount = 0;
+                    let otherCount = 0;
+                    
+                    // Process all vessel markers from registry (not just those currently on map)
+                    Object.values(window.allVesselMarkers).forEach(layer => {
+                        if (!(layer instanceof L.CircleMarker)) {
+                            return; // Skip invalid entries
+                        }
+                        
+                        const color = layer.options.color?.toLowerCase() || '';
+                        let shouldShow = true;
+                        let vesselType = 'unknown';
+                        
+                        // Check vessel type filter
+                        if (color.includes('#d32f2f') || color.includes('#b71c1c') || 
+                            color.includes('#dc143c') || color.includes('#8b0000') ||
+                            color.includes('red') || color.includes('crimson')) {
+                            vesselType = 'tanker';
+                            shouldShow = filters.tankers;
+                            tankerCount++;
+                        }
+                        else if (color.includes('#1976d2') || color.includes('#ff8c00') || 
+                                 color.includes('#e65100') || color.includes('#ff6347') ||
+                                 color.includes('orange') || color.includes('tomato')) {
+                            vesselType = 'cargo';
+                            shouldShow = filters.cargo;
+                            cargoCount++;
+                        }
+                        else {
+                            vesselType = 'other';
+                            shouldShow = filters.other;
+                            otherCount++;
+                        }
+                        
+                        // Apply visibility
+                        if (shouldShow) {
+                            // Check if there's already a marker for this MMSI on the map
+                            const mmsi = layer.options?.mmsi;
+                            let duplicateFound = false;
+                            
+                            if (mmsi) {
+                                Object.values(map._layers).forEach(existingLayer => {
+                                    if (existingLayer instanceof L.CircleMarker && 
+                                        existingLayer !== layer &&
+                                        existingLayer.options?.mmsi === mmsi) {
+                                        duplicateFound = true;
+                                        // Remove the duplicate (keep the one from registry)
+                                        if (map.hasLayer(existingLayer)) {
+                                            map.removeLayer(existingLayer);
+                                        }
+                                    }
+                                });
+                            }
+                            
+                            // Ensure layer is on the map (only if not already there)
+                            if (!map.hasLayer(layer)) {
+                                layer.addTo(map);
+                            }
+                            shownCount++;
+                        } else {
+                            // Remove layer from map
+                            if (map.hasLayer(layer)) {
+                                map.removeLayer(layer);
+                            }
+                            hiddenCount++;
+                        }
+                    });
+                    
+                    // Count ports separately (always visible)
+                    Object.values(map._layers).forEach(layer => {
+                        if (layer instanceof L.CircleMarker) {
+                            const color = layer.options.color?.toLowerCase() || '';
+                            if (color === 'blue' || color.includes('#64b5f6') || color.includes('lightblue')) {
+                                portCount++;
+                            }
+                        }
+                    });
+                    
+                    console.log(`✅ Filters applied:`);
+                    console.log(`   Total: ${shownCount} shown, ${hiddenCount} hidden`);
+                    console.log(`   Tankers: ${tankerCount}, Cargo: ${cargoCount}, Other: ${otherCount}, Ports: ${portCount}`);
+                    
+                    // Show result without alert (less annoying)
+                    const statusBadge = document.querySelector('.status-badge span');
+                    if (statusBadge) {
+                        const originalText = statusBadge.textContent;
+                        statusBadge.textContent = `${shownCount} vessels shown`;
+                        setTimeout(() => {
+                            statusBadge.textContent = originalText;
+                        }, 3000);
+                    }
+                } catch (e) {
+                    console.error('Filter error:', e);
+                    console.error('Error stack:', e.stack);
+                    alert('Error applying filters: ' + e.message);
+                }
+            }
+            
+            // Load filters from localStorage on page load
+            function loadSavedFilters() {
+                const saved = localStorage.getItem('vesselFilters');
+                if (saved) {
+                    try {
+                        const filters = JSON.parse(saved);
+                        Object.entries(filters).forEach(([key, value]) => {
+                            const elem = document.getElementById('filter-' + key);
+                            if (elem) {
+                                elem.checked = value;
+                            }
+                        });
+                        // Apply saved filters after a short delay to ensure map is ready
+                        setTimeout(() => {
+                            applyFilters();
+                        }, 1000);
+                    } catch (e) {
+                        console.warn('Could not load saved filters:', e);
+                    }
+                }
+            }
+            
+            // Initialize on page load
+            document.addEventListener('DOMContentLoaded', loadSavedFilters);
+            
+            // Keyboard shortcut: F to toggle filters (only if not focused in input)
+            document.addEventListener('keydown', function(e) {
+                if (e.key === 'f' && e.ctrlKey && !document.activeElement.matches('input, textarea')) {
+                    e.preventDefault();
+                    toggleFilterPanel();
+                }
+            });
+        </script>
+        '''
+        
+        title_html += filter_script
         
         # Add JavaScript for auto-refresh functionality
         if ENABLE_AUTO_REFRESH:
@@ -436,6 +1187,17 @@ class MapGenerator:
                     }}
                 }}
                 
+                // Helper function to reset refresh button state
+                function resetRefreshButton() {{
+                    const refreshBtn = document.getElementById('refresh-btn');
+                    if (refreshBtn) {{
+                        refreshBtn.disabled = false;
+                        refreshBtn.textContent = 'Refresh';
+                        refreshBtn.style.background = '#4caf50';
+                    }}
+                    isRefreshing = false;
+                }}
+                
                 // Safe reload function with error handling
                 function safeReload() {{
                     if (isRefreshing) {{
@@ -462,50 +1224,54 @@ class MapGenerator:
                     
                     updateStatus('Refreshing...', '#2196f3');
                     
+                    // Safety timeout to re-enable button if reload doesn't happen
+                    const safetyTimeout = setTimeout(() => {{
+                        console.warn('Reload timeout - re-enabling refresh button');
+                        resetRefreshButton();
+                        updateStatus('Reload timeout - click Refresh again', '#ff9800');
+                    }}, 5000); // 5 second safety timeout
+                    
                     // Create a delay to ensure map generation is complete
                     setTimeout(() => {{
                         try {{
-                            // Try cache-busting URL first
-                            const currentUrl = window.location.href.split('?')[0].split('#')[0];
-                            const timestamp = Date.now();
-                            const refreshUrl = currentUrl + '?_=' + timestamp + '&t=' + timestamp;
+                            // Clear safety timeout since we're reloading
+                            clearTimeout(safetyTimeout);
                             
-                            console.log('Cache-busting refresh URL:', refreshUrl);
-                            
-                            // Test if we can fetch the file first (basic availability check)
-                            fetch(refreshUrl, {{ 
-                                method: 'GET',
-                                cache: 'no-store',
-                                headers: {{
-                                    'Cache-Control': 'no-cache, no-store, must-revalidate',
-                                    'Pragma': 'no-cache',
-                                    'Expires': '0'
-                                }}
-                            }})
-                                .then(response => {{
-                                    console.log('Fetch response status:', response.status);
-                                    if (response.ok) {{
-                                        console.log('File available, reloading with cache-bust');
-                                        window.location.href = refreshUrl;
-                                    }} else {{
-                                        console.warn('File returned status ' + response.status);
-                                        throw new Error('File not available (status: ' + response.status + ')');
-                                    }}
-                                }})
-                                .catch(error => {{
-                                    console.warn('Fetch test failed, using standard reload:', error);
-                                    // Try standard reload with cache bust
-                                    window.location.href = currentUrl + '?_=' + Date.now();
-                                }});
+                            // Use browser's native reload - most reliable method
+                            // For http:// protocol, add cache-busting query parameter
+                            if (window.location.protocol === 'file:') {{
+                                // For file:// protocol, simple reload
+                                window.location.reload();
+                            }} else {{
+                                // For http:// protocol, reload with cache bust using current pathname
+                                // This preserves the correct path and avoids 404 errors
+                                const pathname = window.location.pathname || '/tankers_map.html';
+                                const separator = pathname.includes('?') ? '&' : '?';
+                                window.location.href = pathname + separator + '_=' + Date.now();
+                            }}
                         }} catch (error) {{
                             console.error('Refresh failed:', error);
-                            updateStatus('Refresh failed, retrying...', '#f44336');
-                            // Fallback to standard reload
+                            clearTimeout(safetyTimeout);
+                            resetRefreshButton();
+                            updateStatus('Refresh failed - click Refresh again', '#f44336');
+                            
+                            // Fallback: try simple reload after a delay
                             setTimeout(() => {{
-                                window.location.href = window.location.href.split('?')[0] + '?_=' + Date.now();
+                                try {{
+                                    if (window.location.protocol === 'file:') {{
+                                        window.location.reload();
+                                    }} else {{
+                                        // Fallback: use pathname with default if needed
+                                        const pathname = window.location.pathname || '/tankers_map.html';
+                                        window.location.href = pathname + '?_=' + Date.now();
+                                    }}
+                                }} catch (e) {{
+                                    console.error('Fallback reload also failed:', e);
+                                    resetRefreshButton();
+                                }}
                             }}, 1000);
                         }}
-                    }}, 1500); // Increased to 1500ms to allow file write completion
+                    }}, 500); // Reduced delay for faster response
                 }}
                 
                 // Manual refresh with confirmation
