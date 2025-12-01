@@ -36,11 +36,24 @@ venv.bak/
 *~
 .DS_Store
 
+# Windows
+Thumbs.db
+desktop.ini
+ehthumbs.db
+[Dd]esktop.ini
+$RECYCLE.BIN/
+
 # Project Specific
-tankers_map.html
+**/tankers_map.html
+**/tankers_map.html.tmp
+*.tmp
 *.log
 data/cache/
+src/data/current_region.json
+src/data/region_history.json
 .env
+.env.local
+.env.*.local
 
 # Testing
 .pytest_cache/
@@ -51,3 +64,16 @@ htmlcov/
 
 # Jupyter Notebook
 .ipynb_checkpoints
+
+# Python Type Checking
+.mypy_cache/
+.dmypy.json
+dmypy.json
+.pyre/
+.pytype/
+.ruff_cache/
+
+# Database files
+**/vessels.db
+data/vessels.db
+src/data/vessels.db

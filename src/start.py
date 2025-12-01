@@ -17,15 +17,15 @@ def main():
     """Start the tankers tracker with web interface."""
     print("""
 ╔══════════════════════════════════════════════════════════════════════╗
-║                    🛢️  TANKERS TRACKER v2.0                          ║
-║                   Live AIS Vessel Tracking System                     ║
+║              🌍 TANKER TRACKER v2.0 - WORLDWIDE MODE                 ║
+║              Real-time Global AIS Vessel Tracking                    ║
 ╚══════════════════════════════════════════════════════════════════════╝
 
-🚀 Starting Tankers Tracker...
+🚀 Starting worldwide tracker...
 
 💡 How to use:
    1. Map will open in your browser automatically
-   2. Use the dropdown menu to switch regions
+   2. Pan/zoom freely across the world
    3. Map updates automatically every 30 seconds
    4. Press Ctrl+C here to stop
     """)

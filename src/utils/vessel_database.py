@@ -16,6 +16,8 @@ from datetime import datetime
 from pathlib import Path
 
 from models.vessel import Vessel
+from enums.ship_type import ShipType
+from enums.navigational_status import NavigationalStatus
 
 logger = logging.getLogger(__name__)
 
@@ -189,10 +191,16 @@ class VesselDatabase:
                     return str(value)  # Convert other types to string
             
             # Prepare sanitized parameters (preserve numeric values for ship_type, etc.)
+            # Convert ShipType enum to int value for database storage
+            ship_type_value = vessel.ship_type.value if isinstance(vessel.ship_type, ShipType) else vessel.ship_type
+            
+            # Convert NavigationalStatus enum to int value for database storage
+            nav_status_value = vessel.navigational_status.value if isinstance(vessel.navigational_status, NavigationalStatus) else vessel.navigational_status
+            
             params = (
                 vessel.mmsi, vessel.lat, vessel.lon, vessel.speed, vessel.course,
-                vessel.heading, vessel.rot, vessel.navigational_status, vessel.position_accuracy,
-                sanitize_value(vessel.name), vessel.imo, sanitize_value(vessel.callsign), vessel.ship_type,
+                vessel.heading, vessel.rot, nav_status_value, vessel.position_accuracy,
+                sanitize_value(vessel.name), vessel.imo, sanitize_value(vessel.callsign), ship_type_value,
                 vessel.length, vessel.width, vessel.draught,
                 vessel.dimension_to_bow, vessel.dimension_to_stern,
                 vessel.dimension_to_port, vessel.dimension_to_starboard,
@@ -301,6 +309,14 @@ class VesselDatabase:
         Returns:
             Vessel object
         """
+        # Convert ship_type integer back to ShipType enum
+        ship_type_value = row['ship_type']
+        ship_type = ShipType.from_code(ship_type_value) if ship_type_value is not None else None
+        
+        # Convert navigational_status integer back to NavigationalStatus enum
+        nav_status_value = row['navigational_status']
+        navigational_status = NavigationalStatus.from_code(nav_status_value) if nav_status_value is not None else None
+        
         return Vessel(
             mmsi=row['mmsi'],
             lat=row['lat'],
@@ -309,12 +325,12 @@ class VesselDatabase:
             course=row['course'],
             heading=row['heading'],
             rot=row['rot'],
-            navigational_status=row['navigational_status'],
+            navigational_status=navigational_status,
             position_accuracy=row['position_accuracy'],
             name=row['name'],
             imo=row['imo'],
             callsign=row['callsign'],
-            ship_type=row['ship_type'],
+            ship_type=ship_type,
             length=row['length'],
             width=row['width'],
             draught=row['draught'],
