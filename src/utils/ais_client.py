@@ -67,6 +67,7 @@ class AISClient:
         self.reconnect_attempts = 0
         self.max_reconnect_delay = 60  # Max 60 seconds between reconnects
         self.running = True
+        self.websocket = None  # Store websocket reference for clean shutdown
         
     async def connect(self):
         """Establish WebSocket connection with automatic reconnection."""
@@ -83,6 +84,7 @@ class AISClient:
                     ping_timeout=10,   # Wait 10 seconds for pong
                     close_timeout=10   # Wait 10 seconds for close frame
                 ) as websocket:
+                    self.websocket = websocket  # Store reference for clean shutdown
                     logger.info("✅ Connected to AIS Stream!\n")
                     
                     # Reset reconnection counter on successful connection
@@ -135,12 +137,20 @@ class AISClient:
                 await asyncio.sleep(10)
     
     def stop(self):
-        """Stop the AIS client and prevent reconnection."""
+        """Stop the AIS client and close WebSocket cleanly."""
         logger.info("Stopping AIS client...")
         self.running = False
         
+        # Cancel processing task if exists
         if self.processing_task and not self.processing_task.done():
             self.processing_task.cancel()
+        
+        # Close WebSocket connection cleanly
+        if self.websocket and not self.websocket.closed:
+            try:
+                asyncio.create_task(self.websocket.close())
+            except Exception:
+                pass  # Ignore errors during shutdown
     
     async def _subscribe(self, websocket):
         """Send subscription message to AIS Stream."""
@@ -171,8 +181,14 @@ class AISClient:
                 logger.debug(f"JSON decode error: {e}")
             except KeyError as e:
                 logger.debug(f"Missing key in message: {e}")
+            except websockets.exceptions.ConnectionClosed:
+                # Connection closed - likely stopping or region switch
+                if self.running:
+                    logger.debug("WebSocket connection closed")
+                break
             except Exception as e:
-                logger.warning(f"Error processing message: {e}")
+                if self.running:
+                    logger.warning(f"Error processing message: {e}")
     
     async def _batch_processor(self):
         """Process messages in batches for better performance."""

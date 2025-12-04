@@ -17,7 +17,7 @@ AIS_API_KEY = os.getenv("AIS_API_KEY", "77751d32bae3caa0b20f2d7099f03ef5b836fb4c
 AIS_URL = "wss://stream.aisstream.io/v0/stream"
 
 # Application Settings
-MAX_TRACKED_SHIPS = int(os.getenv("MAX_TRACKED_SHIPS", "500"))  # Increased for more tracking
+MAX_TRACKED_SHIPS = int(os.getenv("MAX_TRACKED_SHIPS", "1000"))  # Increased for more tracking
 UPDATE_INTERVAL = int(os.getenv("UPDATE_INTERVAL", "5"))  # Update map every N position reports
 AUTO_MAP_UPDATE_SECONDS = int(os.getenv("AUTO_MAP_UPDATE_SECONDS", "15"))  # Auto-refresh interval
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
