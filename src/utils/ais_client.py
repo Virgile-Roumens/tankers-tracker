@@ -11,8 +11,9 @@ from typing import Dict, Callable, Optional, List
 import logging
 from collections import deque
 
-from config import AIS_API_KEY, AIS_URL, TANKER_TYPES
+from config import AIS_API_KEY, AIS_URL
 from models.vessel import Vessel
+from enums.ship_type import ShipType
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -82,7 +83,7 @@ class AISClient:
                     AIS_URL,
                     ping_interval=20,  # Send ping every 20 seconds
                     ping_timeout=10,   # Wait 10 seconds for pong
-                    close_timeout=10   # Wait 10 seconds for close frame
+                    close_timeout=5    # Reduced from 10 to prevent looping closes
                 ) as websocket:
                     self.websocket = websocket  # Store reference for clean shutdown
                     logger.info("✅ Connected to AIS Stream!\n")
@@ -108,12 +109,18 @@ class AISClient:
                 if not self.running:
                     break
                 
+                # Skip logging if it's just a graceful close (no close frame is normal)
+                if "no close frame" not in str(e).lower():
+                    logger.warning(f"⚠️  Connection lost: {type(e).__name__}")
+                else:
+                    logger.debug(f"Connection closed gracefully")
+                
                 # Calculate exponential backoff delay
                 self.reconnect_attempts += 1
                 delay = min(2 ** self.reconnect_attempts, self.max_reconnect_delay)
                 
-                logger.warning(f"⚠️  Connection lost: {type(e).__name__}")
-                logger.info(f"🔄 Reconnecting in {delay} seconds... (attempt {self.reconnect_attempts})")
+                if "no close frame" not in str(e).lower():
+                    logger.info(f"🔄 Reconnecting in {delay} seconds... (attempt {self.reconnect_attempts})")
                 
                 # Cancel processing task if exists
                 if self.processing_task and not self.processing_task.done():
@@ -153,15 +160,21 @@ class AISClient:
                 pass  # Ignore errors during shutdown
     
     async def _subscribe(self, websocket):
-        """Send subscription message to AIS Stream."""
+        """Subscribe to ALL 30 regions worldwide (no regional fallback)."""
+        from config import REGIONS
+        
+        # Subscribe to ALL regions at once for worldwide tracking
+        bounding_boxes = list(REGIONS.values())
+        
         subscribe_message = {
             "APIKey": AIS_API_KEY,
-            "BoundingBoxes": [self.region_bounds],
+            "BoundingBoxes": bounding_boxes,
             "FilterMessageTypes": ["PositionReport", "ShipStaticData"]
         }
         
         await websocket.send(json.dumps(subscribe_message))
-        logger.info("📡 Subscription active. Listening for vessel data...\n")
+        logger.info(f"📡 Subscribed to {len(bounding_boxes)} worldwide regions")
+        logger.info("📡 Listening for vessel data...\n")
     
     async def _listen(self, websocket):
         """Listen for and process incoming AIS messages."""
@@ -196,10 +209,14 @@ class AISClient:
             try:
                 if len(self.message_queue) >= self.batch_size:
                     # Process batch
-                    batch = [self.message_queue.popleft() for _ in range(min(self.batch_size, len(self.message_queue)))]
+                    batch_size = min(self.batch_size, len(self.message_queue))
+                    batch = [self.message_queue.popleft() for _ in range(batch_size)]
                     
-                    # Process messages concurrently
+                    # Process messages concurrently with gather
                     await asyncio.gather(*[self._process_message(msg) for msg in batch], return_exceptions=True)
+                    
+                    # Log batch completion
+                    logger.debug(f"Processed batch of {batch_size} messages")
                 else:
                     # Small delay to avoid busy waiting
                     await asyncio.sleep(0.01)
@@ -242,24 +259,8 @@ class AISClient:
             # Extract dimensions
             dimension_data = static_data.get("Dimension", {})
             
-            # Process ETA data (convert dict to string if needed)
-            eta_data = static_data.get("Eta")
-            eta_string = None
-            if eta_data:
-                if isinstance(eta_data, dict):
-                    # Convert ETA dict to readable string format
-                    month = eta_data.get("Month", 0)
-                    day = eta_data.get("Day", 0) 
-                    hour = eta_data.get("Hour", 24)
-                    minute = eta_data.get("Minute", 60)
-                    
-                    if month > 0 and day > 0:
-                        if hour < 24 and minute < 60:
-                            eta_string = f"{month:02d}-{day:02d} {hour:02d}:{minute:02d}"
-                        else:
-                            eta_string = f"{month:02d}-{day:02d}"
-                else:
-                    eta_string = str(eta_data)
+            # Process ETA data (optimized - single try/except)
+            eta_string = self._parse_eta(static_data.get("Eta"))
             
             # Update static data with comprehensive information
             old_ship_type = self.vessels[mmsi].ship_type
@@ -297,8 +298,8 @@ class AISClient:
                 self.on_static_data(self.vessels[mmsi])
             
             # Log tanker types with more info
-            if ship_type in TANKER_TYPES:
-                vessel = self.vessels[mmsi]
+            vessel = self.vessels[mmsi]
+            if vessel.is_tanker():
                 dims = f"{vessel.get_dimensions()}" if vessel.length else "Unknown size"
                 logger.info(f"📋 ✅ TANKER {vessel.name} [{dims}] → {vessel.destination or 'Unknown'}")
     
@@ -343,7 +344,7 @@ class AISClient:
             
             # Log position with enhanced info
             vessel = self.vessels[mmsi]
-            is_tanker = "🛢️" if vessel.is_tanker(TANKER_TYPES) else "🚢"
+            is_tanker = "🛢️" if vessel.is_tanker() else "🚢"
             nav_status = vessel.get_navigational_status_text() if vessel.navigational_status is not None else "Unknown"
             
             logger.info(f"{is_tanker} {vessel.name or mmsi} | "
@@ -359,7 +360,7 @@ class AISClient:
         if time.time() - self.last_summary_time > 45:
             active = sum(1 for v in self.vessels.values() if v.has_position())
             tanker_count = sum(1 for v in self.vessels.values() 
-                             if v.has_position() and v.is_tanker(TANKER_TYPES))
+                             if v.has_position() and v.is_tanker())
             
             logger.info(f"\n{'='*70}")
             logger.info(f"📊 STATS: {active} vessels ({tanker_count} tankers)")
@@ -376,3 +377,35 @@ class AISClient:
         """Get vessels with valid position data."""
         return {mmsi: vessel for mmsi, vessel in self.vessels.items() 
                 if vessel.has_position()}
+    
+    @staticmethod
+    def _parse_eta(eta_data: Optional[dict]) -> Optional[str]:
+        """
+        Optimized ETA parsing with minimal type checks.
+        
+        Args:
+            eta_data: ETA data from AIS message
+            
+        Returns:
+            Formatted ETA string or None
+        """
+        if not eta_data:
+            return None
+        
+        try:
+            if isinstance(eta_data, dict):
+                month = eta_data.get("Month", 0)
+                day = eta_data.get("Day", 0)
+                
+                if month > 0 and day > 0:
+                    hour = eta_data.get("Hour", 24)
+                    minute = eta_data.get("Minute", 60)
+                    
+                    if hour < 24 and minute < 60:
+                        return f"{month:02d}-{day:02d} {hour:02d}:{minute:02d}"
+                    else:
+                        return f"{month:02d}-{day:02d}"
+            else:
+                return str(eta_data)
+        except Exception:
+            return None

@@ -107,8 +107,8 @@ class TrackerManager:
         return self.start_tracker(new_region)
     
     def get_current_region(self) -> str:
-        """Get the current region. Returns default if not set."""
-        return self.current_region or 'persian_gulf'
+        """Get worldwide region (always)."""
+        return 'worldwide'
     
     def set_current_region(self, region: str) -> bool:
         """Set the current region. Returns True on success."""
@@ -168,61 +168,8 @@ class TankersTrackerHandler(SimpleHTTPRequestHandler):
         return super().do_GET()
     
     def do_POST(self):
-        """Handle POST requests."""
-        parsed_path = urlparse(self.path)
-        
-        if parsed_path.path == '/api/change-region':
-            try:
-                # Read POST data
-                content_length = int(self.headers['Content-Length'])
-                post_data = self.rfile.read(content_length).decode('utf-8')
-                
-                # Parse JSON data
-                try:
-                    data = json.loads(post_data)
-                    new_region = data.get('region')
-                except json.JSONDecodeError:
-                    # Try form data
-                    form_data = parse_qs(post_data)
-                    new_region = form_data.get('region', [None])[0]
-                
-                if not new_region:
-                    self.send_json_response({'error': 'No region specified'}, status=400)
-                    return
-                
-                if new_region not in REGIONS:
-                    self.send_json_response({
-                        'error': f'Invalid region: {new_region}',
-                        'available_regions': list(REGIONS.keys())
-                    }, status=400)
-                    return
-                
-                # Switch region in region switcher (saves preference)
-                success = self.region_switcher.set_current_region(new_region)
-                
-                if success:
-                    # Restart tracker with new region
-                    tracker_started = tracker_manager.restart_tracker(new_region)
-                    
-                    self.send_json_response({
-                        'success': True,
-                        'region': new_region,
-                        'tracker_restarted': tracker_started,
-                        'message': f'Region switched to {new_region}. Tracker is restarting...'
-                    })
-                else:
-                    self.send_json_response({
-                        'error': 'Failed to switch region'
-                    }, status=500)
-                
-            except Exception as e:
-                self.send_json_response({
-                    'error': f'Server error: {str(e)}'
-                }, status=500)
-            
-            return
-        
-        # Method not allowed for other paths
+        """Handle POST requests (no endpoints - worldwide only)."""
+        # No POST endpoints - worldwide mode only
         self.send_response(405)
         self.send_header('Content-Type', 'text/plain')
         self.end_headers()

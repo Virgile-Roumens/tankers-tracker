@@ -10,7 +10,9 @@ from typing import Dict, Optional, List
 from datetime import datetime
 
 from models.vessel import Vessel
-from config import TANKER_TYPES, SHIP_TYPE_NAMES
+from enums.ship_type import ShipType
+from enums.navigational_status import NavigationalStatus
+from enums.tanker_class import TankerClass
 
 logger = logging.getLogger(__name__)
 
@@ -23,42 +25,22 @@ class VesselDisplayService:
     with special attention to tanker-specific information.
     """
     
-    # Tanker size classifications
-    TANKER_CLASSES = {
-        'ULCC': (320000, float('inf')),      # Ultra Large Crude Carrier
-        'VLCC': (200000, 320000),            # Very Large Crude Carrier
-        'Suezmax': (120000, 200000),         # Suez Canal max size
-        'Aframax': (80000, 120000),          # Average Freight Rate Assessment
-        'Panamax': (60000, 80000),           # Panama Canal max size
-        'Handymax': (40000, 60000),          # Handy maximum
-        'Handysize': (10000, 40000),         # Handy size
-        'Small': (0, 10000)                  # Small tanker
-    }
+    # Tanker size classifications - now using TankerClass enum
+    # See enums/tanker_class.py for the complete implementation
     
-    # Navigation status with colors
-    NAV_STATUS_COLORS = {
-        0: ('#4CAF50', 'Under way using engine'),
-        1: ('#FF9800', 'At anchor'),
-        2: ('#F44336', 'Not under command'),
-        3: ('#F44336', 'Restricted manoeuvrability'),
-        4: ('#FF5722', 'Constrained by draught'),
-        5: ('#2196F3', 'Moored'),
-        6: ('#F44336', 'Aground'),
-        7: ('#00BCD4', 'Engaged in fishing'),
-        8: ('#4CAF50', 'Under way sailing'),
-        15: ('#9E9E9E', 'Not defined')
-    }
+    # Navigation status colors - now using NavigationalStatus enum
+    # See enums/navigational_status.py for the complete implementation
     
     def get_vessel_icon(self, vessel: Vessel) -> str:
         """Get appropriate icon for vessel type."""
-        if vessel.is_tanker(TANKER_TYPES):
+        if vessel.is_tanker():
             return '🛢️'
-        elif vessel.ship_type in range(70, 80):
+        elif vessel.ship_type and vessel.ship_type.is_cargo():
             return '📦'
         else:
             return '🚢'
     
-    def get_tanker_class(self, vessel: Vessel) -> Optional[str]:
+    def get_tanker_class(self, vessel: Vessel) -> Optional[TankerClass]:
         """
         Determine tanker size classification.
         
@@ -66,17 +48,12 @@ class VesselDisplayService:
             vessel: Vessel object
             
         Returns:
-            Tanker class name or None
+            TankerClass enum or None
         """
-        if not vessel.is_tanker(TANKER_TYPES) or not vessel.deadweight:
+        if not vessel.is_tanker() or not vessel.deadweight:
             return None
         
-        dwt = vessel.deadweight
-        for class_name, (min_dwt, max_dwt) in self.TANKER_CLASSES.items():
-            if min_dwt <= dwt < max_dwt:
-                return class_name
-        
-        return 'Unknown'
+        return TankerClass.classify(vessel.deadweight)
     
     def estimate_cargo_capacity(self, vessel: Vessel) -> Optional[str]:
         """
@@ -107,7 +84,7 @@ class VesselDisplayService:
         # Estimate from dimensions
         if vessel.length and vessel.width and vessel.draught:
             volume = vessel.length * vessel.width * vessel.draught * 0.7  # cargo factor
-            if vessel.is_tanker(TANKER_TYPES):
+            if vessel.is_tanker():
                 # Crude oil: ~0.85 tonnes/m³
                 capacity = volume * 0.85
             else:
@@ -205,15 +182,13 @@ class VesselDisplayService:
             HTML string for popup
         """
         icon = self.get_vessel_icon(vessel)
-        ship_type_name = SHIP_TYPE_NAMES.get(vessel.ship_type, f"Type {vessel.ship_type}")
+        ship_type_name = vessel.get_ship_type_name()
         
-        # Determine vessel color based on type and status
-        if vessel.is_tanker(TANKER_TYPES):
-            header_color = "#C62828"  # Dark red for tankers
-        elif vessel.ship_type in range(70, 80):
-            header_color = "#F57C00"  # Orange for cargo
+        # Determine vessel color based on ship type
+        if vessel.ship_type:
+            header_color = vessel.ship_type.get_color()
         else:
-            header_color = "#1976D2"  # Blue for others
+            header_color = "#808080"  # Gray for unknown type
         
         html = f"""
         <div style="font-family: 'Segoe UI', Arial, sans-serif; min-width: 280px; max-width: 350px;">
@@ -261,7 +236,7 @@ class VesselDisplayService:
             """
         
         # Tanker-Specific Information
-        if vessel.is_tanker(TANKER_TYPES):
+        if vessel.is_tanker():
             tanker_class = self.get_tanker_class(vessel)
             capacity = self.estimate_cargo_capacity(vessel)
             
@@ -277,7 +252,11 @@ class VesselDisplayService:
                 html += f"""
                 <tr style="background: #fffaf0;">
                     <td style="padding: 4px 8px; color: #666;">Class:</td>
-                    <td style="padding: 4px 8px; font-weight: 600; color: #e65100;">{tanker_class}</td>
+                    <td style="padding: 4px 8px; font-weight: 600; color: #e65100;">{tanker_class.display_name}</td>
+                </tr>
+                <tr style="background: #fffaf0;">
+                    <td style="padding: 4px 8px; color: #666;">DWT Range:</td>
+                    <td style="padding: 4px 8px; font-weight: 500;">{tanker_class.min_dwt:,.0f} - {tanker_class.max_dwt:,.0f}</td>
                 </tr>
                 """
             
@@ -319,10 +298,8 @@ class VesselDisplayService:
             """
         
         if vessel.navigational_status is not None:
-            color, status_text = self.NAV_STATUS_COLORS.get(
-                vessel.navigational_status, 
-                ('#9E9E9E', 'Unknown')
-            )
+            color = vessel.navigational_status.get_color()
+            status_text = vessel.navigational_status.display_name
             html += f"""
                 <tr>
                     <td style="padding: 4px 8px; color: #666;">Status:</td>
@@ -432,10 +409,10 @@ class VesselDisplayService:
         
         parts = [f"{icon} {name}"]
         
-        if vessel.is_tanker(TANKER_TYPES):
+        if vessel.is_tanker():
             tanker_class = self.get_tanker_class(vessel)
             if tanker_class:
-                parts.append(f"({tanker_class})")
+                parts.append(f"({tanker_class.display_name})")
         
         if vessel.speed:
             parts.append(f"{vessel.speed:.1f} kts")

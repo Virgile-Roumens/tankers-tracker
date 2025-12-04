@@ -30,12 +30,19 @@ USER_ACTIVITY_TIMEOUT = int(os.getenv("USER_ACTIVITY_TIMEOUT", "5"))  # Seconds 
 
 # Performance Settings
 ENABLE_CONCURRENT_PROCESSING = os.getenv("ENABLE_CONCURRENT_PROCESSING", "true").lower() == "true"
-MESSAGE_BATCH_SIZE = int(os.getenv("MESSAGE_BATCH_SIZE", "10"))  # Process messages in batches
+MESSAGE_BATCH_SIZE = int(os.getenv("MESSAGE_BATCH_SIZE", "50"))  # Process messages in batches (increased from 10)
 USE_DATABASE_CACHE = os.getenv("USE_DATABASE_CACHE", "true").lower() == "true"
 DATABASE_PATH = os.getenv("DATABASE_PATH", "data/vessels.db")
+DATABASE_BATCH_SIZE = int(os.getenv("DATABASE_BATCH_SIZE", "100"))  # Batch database commits
+USE_ASYNC_DATABASE = os.getenv("USE_ASYNC_DATABASE", "true").lower() == "true"  # Use aiosqlite for async I/O
 
-# Ship Type Definitions (IMO codes)
-TANKER_TYPES = list(range(70, 90))  # 70-89 are tanker/cargo vessel types
+# Worldwide Tracking Mode - ALWAYS ON (no regional fallback)
+MAX_TRACKED_SHIPS = int(os.getenv("MAX_TRACKED_SHIPS", "5000"))  # All worldwide vessels
+
+# Ship Type Definitions - now using ShipType enum (see enums/ship_type.py)
+# Cargo vessels: IMO codes 70-79
+# Tankers: IMO codes 80-89
+# Use ShipType enum for type-safe ship classification
 
 # Regional Bounding Boxes [South-West Corner, North-East Corner]
 # Strategic tanker chokepoints and major oil shipping routes
@@ -249,19 +256,8 @@ PORTS: Dict[str, List[Dict]] = {
 # Map Display Settings
 MAP_TILES = "CartoDB positron"
 MAP_ZOOM_LEVEL = 7
-PORT_MARKER_RADIUS = 8
-VESSEL_MARKER_RADIUS = 6
+PORT_MARKER_RADIUS = 5  # Reduced from 8 for cleaner look
+VESSEL_MARKER_RADIUS = 3  # Reduced from 6 for smaller boat icons
 
-# Ship Type Descriptions
-SHIP_TYPE_NAMES = {
-    70: "Cargo",
-    71: "Cargo - Hazardous A",
-    72: "Cargo - Hazardous B",
-    73: "Cargo - Hazardous C",
-    74: "Cargo - Hazardous D",
-    80: "Tanker",
-    81: "Tanker - Hazardous A",
-    82: "Tanker - Hazardous B",
-    83: "Tanker - Hazardous C",
-    84: "Tanker - Hazardous D",
-}
+# Ship Type Descriptions - now using ShipType enum (see enums/ship_type.py)
+# SHIP_TYPE_NAMES removed - use ShipType.display_name property instead
