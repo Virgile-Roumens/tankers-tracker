@@ -36,12 +36,15 @@ from config import (
     MESSAGE_BATCH_SIZE,
     REGIONS, 
     UPDATE_INTERVAL,
-    USE_DATABASE_CACHE
+    USE_DATABASE_CACHE,
+    TRACK_TANKERS,
+    TRACK_CARGO_BULK
 )
 from models.vessel import Vessel
 from utils.ais_client import AISClient
 from utils.map_generator import MapGenerator
 from utils.vessel_info_service import VesselInfoService
+from services.bulk_tracking_service import classify_all_vessels, log_classification_stats
 
 # Configure logging with better formatting
 logging.basicConfig(
@@ -254,6 +257,8 @@ class TankersTracker:
         """Update the map with current vessel positions (vessels in/near region)."""
         vessels = self._get_vessels_in_region(expand_margin=0.5)  # Slightly expanded for updates
         if len(vessels) > 0:
+            # Classify all vessels (tanker class, bulk carrier class, etc.)
+            classify_all_vessels(vessels)
             self.map_generator.generate_map(vessels, auto_open=False)
             self.last_map_update = time.time()
         else:
@@ -271,6 +276,10 @@ class TankersTracker:
                 vessels = self.vessel_service.get_active_vessels()
                 
                 if len(vessels) > 0:
+                    # Classify all vessels before map generation
+                    stats = classify_all_vessels(vessels)
+                    log_classification_stats(stats)
+                    
                     logger.info("[AUTO-UPDATE] Refreshing map...")
                     self.map_generator.generate_map(vessels, auto_open=False)
                 self.last_map_update = time.time()
@@ -314,7 +323,7 @@ class TankersTracker:
         """Display startup information and configuration."""
         banner = f"""
 {'=' * 75}
-🛢️  TANKER TRACKER v2.0 - WORLDWIDE MODE
+🛢️  TANKER & BULK CARRIER TRACKER v2.1 - WORLDWIDE MODE
 {'=' * 75}
 Configuration:
   Mode: 🌍 WORLDWIDE (All 30 regions)
@@ -323,6 +332,8 @@ Configuration:
   Auto-refresh: Every {self.auto_map_update_seconds} seconds
   Database caching: {'✅ Enabled' if self.use_database else '❌ Disabled'}
   Concurrent processing: {'✅ Enabled' if self.enable_concurrent else '❌ Disabled'}
+  Track tankers (wet bulk): {'✅' if TRACK_TANKERS else '❌'}
+  Track cargo/bulk (dry bulk): {'✅' if TRACK_CARGO_BULK else '❌'}
 
 Worldwide bounds: [-90, -180] to [90, 180]
 {'=' * 75}
@@ -349,6 +360,11 @@ Worldwide bounds: [-90, -180] to [90, 180]
             
             # Display all vessels worldwide
             vessels_to_display = self.vessel_service.get_active_vessels()
+            
+            # Classify all vessels
+            if len(vessels_to_display) > 0:
+                stats = classify_all_vessels(vessels_to_display)
+                log_classification_stats(stats)
             
             self.map_generator.generate_map(vessels_to_display, auto_open=self.auto_open_browser)
             
@@ -407,6 +423,12 @@ Worldwide bounds: [-90, -180] to [90, 180]
     def _display_final_statistics(self, stats: Dict) -> None:
         """Display comprehensive final statistics."""
         try:
+            # Run classification on final vessel set
+            vessels = self.vessel_service.get_active_vessels()
+            if vessels:
+                class_stats = classify_all_vessels(vessels)
+                log_classification_stats(class_stats)
+            
             print(f"\n{'=' * 75}")
             print("📊 FINAL STATISTICS")
             print(f"{'=' * 75}")
@@ -446,7 +468,7 @@ def main():
     parser.add_argument('--region', '-r', default=None, 
                        help='Region to track (default: uses saved preference or suez_canal)')
     parser.add_argument('--max-ships', type=int, default=10000,
-                       help='Maximum ships to track (default: 10000)')
+                       help='Maximum ships to track (default: 10000, supports tankers + bulk carriers)')
     parser.add_argument('--update-interval', type=int, default=5,
                        help='Map update interval in position reports (default: 5)')
     parser.add_argument('--auto-refresh', type=int, default=15,

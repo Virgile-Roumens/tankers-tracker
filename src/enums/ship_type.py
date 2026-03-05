@@ -91,6 +91,25 @@ class ShipType(IntEnum):
         """
         return 70 <= self.value <= 79
     
+    def is_bulk_or_cargo(self) -> bool:
+        """
+        Check if this ship type is a bulk/cargo vessel (70-79).
+        Alias for is_cargo() - bulk carriers use the same AIS codes.
+        
+        Returns:
+            bool: True if this is a cargo/bulk vessel (70-79)
+        """
+        return 70 <= self.value <= 79
+    
+    def is_trackable_bulk(self) -> bool:
+        """
+        Check if this ship type is either wet bulk (tanker) or dry bulk (cargo).
+        
+        Returns:
+            bool: True for ship types 70-89
+        """
+        return 70 <= self.value <= 89
+    
     @classmethod
     def from_code(cls, code: Optional[int]) -> Optional['ShipType']:
         """
@@ -123,9 +142,34 @@ class ShipType(IntEnum):
         elif self.is_cargo():
             if self.is_hazardous():
                 return '#e65100'  # Dark orange for hazardous cargo
-            return '#1976d2'  # Blue for regular cargo
+            return '#FF8C00'  # Dark orange for bulk/cargo vessels
         else:
             return '#388e3c'  # Green for other vessels
+    
+    @classmethod
+    def get_category_name(cls, ship_type_value: int) -> str:
+        """
+        Get human-readable category name for a raw ship type integer value.
+        
+        Args:
+            ship_type_value: Integer AIS ship type code
+            
+        Returns:
+            str: Human-readable category name
+        """
+        first_digit = ship_type_value // 10
+        categories = {
+            0: "Not Available",
+            2: "WIG",
+            3: "Special",
+            4: "HSC",
+            5: "Special",
+            6: "Passenger",
+            7: "Cargo/Bulk",
+            8: "Tanker",
+            9: "Other"
+        }
+        return categories.get(first_digit, "Unknown")
     
     @classmethod
     def all_tanker_types(cls) -> Set['ShipType']:
@@ -176,4 +220,5 @@ _SHIP_TYPE_NAMES = {
 # Convenience constants
 CARGO_CODES = list(range(70, 80))   # Cargo vessels: IMO codes 70-79
 TANKER_CODES = list(range(80, 90))  # Tankers: IMO codes 80-89
+ALL_BULK_CODES = CARGO_CODES + TANKER_CODES  # All trackable bulk types: 70-89
 

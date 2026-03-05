@@ -8,6 +8,7 @@ from typing import Optional, List, Union
 
 from enums.ship_type import ShipType
 from enums.navigational_status import NavigationalStatus
+from enums.bulk_carrier_class import BulkCarrierClass
 
 
 @dataclass
@@ -89,6 +90,12 @@ class Vessel:
     cargo: Optional[str] = None
     deadweight: Optional[int] = None
     gross_tonnage: Optional[int] = None
+    
+    # Bulk carrier classification (set by bulk_tracking_service.classify_vessel)
+    vessel_category: Optional[str] = None  # "Tanker", "Bulk Carrier", "Cargo", "Other", "Unknown"
+    is_bulk_carrier: bool = False
+    bulk_carrier_class: Optional[BulkCarrierClass] = None
+    tanker_class: Optional[object] = None  # TankerClass enum, kept as object to avoid circular import
     
     # Tracking Metadata
     last_update: Optional[str] = None
@@ -213,6 +220,30 @@ class Vessel:
         """
         return self.ship_type.is_tanker() if self.ship_type else False
     
+    def is_cargo_or_bulk(self) -> bool:
+        """
+        Check if vessel is a cargo/bulk type.
+        
+        Returns:
+            bool: True if vessel is cargo/bulk (IMO codes 70-79), False otherwise
+        """
+        return self.ship_type.is_cargo() if self.ship_type else False
+    
+    def get_display_class(self) -> str:
+        """
+        Get the display string for vessel sub-classification.
+        
+        Returns:
+            str: Human-readable classification string
+        """
+        if self.vessel_category == "Tanker" and self.tanker_class:
+            return f"Tanker ({self.tanker_class.display_name})"
+        elif self.vessel_category == "Bulk Carrier" and self.bulk_carrier_class:
+            return f"Bulk Carrier ({self.bulk_carrier_class.display_name})"
+        elif self.vessel_category:
+            return self.vessel_category
+        return self.get_ship_type_name()
+    
     def get_ship_type_name(self) -> str:
         """
         Get human-readable ship type name.
@@ -254,12 +285,18 @@ class Vessel:
             "destination": self.destination,
             "eta": self.eta,
             "ship_type": self.ship_type.value if self.ship_type else None,
+            "ship_type_name": self.get_ship_type_name(),
             "length": self.length,
             "width": self.width,
             "draught": self.draught,
             "cargo": self.cargo,
             "deadweight": self.deadweight,
             "gross_tonnage": self.gross_tonnage,
+            "vessel_category": self.vessel_category,
+            "is_bulk_carrier": self.is_bulk_carrier,
+            "bulk_carrier_class": self.bulk_carrier_class.display_name if self.bulk_carrier_class else None,
+            "tanker_class": self.tanker_class.display_name if self.tanker_class else None,
+            "display_class": self.get_display_class(),
             "last_update": self.last_update,
             "first_seen": self.first_seen,
             "update_count": self.update_count

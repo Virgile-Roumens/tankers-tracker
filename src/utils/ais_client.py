@@ -32,7 +32,7 @@ class AISClient:
     
     def __init__(self, 
                  region_bounds: list,
-                 max_vessels: int = 500,
+                 max_vessels: int = 5000,
                  on_static_data: Optional[Callable] = None,
                  on_position_update: Optional[Callable] = None,
                  batch_size: int = 10,
@@ -297,11 +297,14 @@ class AISClient:
             if self.on_static_data:
                 self.on_static_data(self.vessels[mmsi])
             
-            # Log tanker types with more info
+            # Log tanker and bulk carrier types with more info
             vessel = self.vessels[mmsi]
             if vessel.is_tanker():
                 dims = f"{vessel.get_dimensions()}" if vessel.length else "Unknown size"
                 logger.info(f"📋 ✅ TANKER {vessel.name} [{dims}] → {vessel.destination or 'Unknown'}")
+            elif vessel.ship_type and vessel.ship_type.is_cargo():
+                dims = f"{vessel.get_dimensions()}" if vessel.length else "Unknown size"
+                logger.info(f"📋 📦 CARGO/BULK {vessel.name} [{dims}] → {vessel.destination or 'Unknown'}")
     
     async def _handle_position_report(self, message: dict):
         """Handle position report messages with enhanced data extraction."""
@@ -344,10 +347,15 @@ class AISClient:
             
             # Log position with enhanced info
             vessel = self.vessels[mmsi]
-            is_tanker = "🛢️" if vessel.is_tanker() else "🚢"
+            if vessel.is_tanker():
+                icon = "🛢️"
+            elif vessel.ship_type and vessel.ship_type.is_cargo():
+                icon = "📦"
+            else:
+                icon = "🚢"
             nav_status = vessel.get_navigational_status_text() if vessel.navigational_status is not None else "Unknown"
             
-            logger.info(f"{is_tanker} {vessel.name or mmsi} | "
+            logger.info(f"{icon} {vessel.name or mmsi} | "
                        f"{vessel.lat:.4f}, {vessel.lon:.4f} | "
                        f"{vessel.speed or 0:.1f} kts @ {vessel.course or 0:.0f}° | "
                        f"{nav_status}")
@@ -361,9 +369,11 @@ class AISClient:
             active = sum(1 for v in self.vessels.values() if v.has_position())
             tanker_count = sum(1 for v in self.vessels.values() 
                              if v.has_position() and v.is_tanker())
+            cargo_count = sum(1 for v in self.vessels.values()
+                            if v.has_position() and v.ship_type and v.ship_type.is_cargo())
             
             logger.info(f"\n{'='*70}")
-            logger.info(f"📊 STATS: {active} vessels ({tanker_count} tankers)")
+            logger.info(f"📊 STATS: {active} vessels ({tanker_count} tankers, {cargo_count} cargo/bulk)")
             logger.info(f"   Positions: {self.position_count} | Static data: {self.static_count}")
             logger.info(f"{'='*70}\n")
             

@@ -97,7 +97,8 @@ class VesselInfoService:
                      'length', 'width', 'draught',
                      'dimension_to_bow', 'dimension_to_stern',
                      'dimension_to_port', 'dimension_to_starboard',
-                     'destination', 'eta', 'cargo', 'deadweight', 'gross_tonnage']:
+                     'destination', 'eta', 'cargo', 'deadweight', 'gross_tonnage',
+                     'vessel_category', 'is_bulk_carrier', 'bulk_carrier_class', 'tanker_class']:
             
             new_val = getattr(new, attr, None)
             existing_val = getattr(existing, attr, None)

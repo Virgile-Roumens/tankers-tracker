@@ -48,7 +48,7 @@ class TrackerManager:
             # Create tracker instance
             self.tracker = TankersTracker(
                 selected_region=region,
-                max_tracked_ships=1000,
+                max_tracked_ships=5000,
                 update_interval=5,
                 auto_map_update_seconds=30,
                 use_database=True,
@@ -164,8 +164,174 @@ class TankersTrackerHandler(SimpleHTTPRequestHandler):
             self.send_json_response(regions_info)
             return
         
+        elif parsed_path.path == '/api/vessels':
+            # Return vessel data with optional filtering
+            self._handle_vessels_api(parsed_path)
+            return
+        
+        elif parsed_path.path == '/api/vessels/bulk-carriers':
+            # Return bulk carrier data with optional class filtering
+            self._handle_bulk_carriers_api(parsed_path)
+            return
+        
+        elif parsed_path.path == '/api/vessels/tankers':
+            # Return tanker data
+            self._handle_tankers_api(parsed_path)
+            return
+        
+        elif parsed_path.path == '/api/statistics':
+            # Return classification statistics
+            self._handle_statistics_api()
+            return
+        
+        elif parsed_path.path == '/api/filters':
+            # Return available filter options
+            self._handle_filters_api()
+            return
+        
         # Handle static files normally
         return super().do_GET()
+    
+    def _handle_vessels_api(self, parsed_path):
+        """Handle /api/vessels endpoint with optional filters."""
+        try:
+            from services.bulk_tracking_service import classify_all_vessels, get_bulk_carriers, get_tankers
+            from enums.bulk_carrier_class import BulkCarrierClass
+            from enums.tanker_class import TankerClass
+            
+            query_params = parse_qs(urlparse(self.path).query)
+            category = query_params.get('category', [None])[0]
+            bulk_class = query_params.get('bulk_class', [None])[0]
+            tanker_class = query_params.get('tanker_class', [None])[0]
+            
+            # Get vessels from tracker
+            vessels = {}
+            if tracker_manager.tracker and hasattr(tracker_manager.tracker, 'vessel_service'):
+                vessels = tracker_manager.tracker.vessel_service.get_active_vessels()
+                classify_all_vessels(vessels)
+            
+            # Apply filters
+            if category:
+                vessels = {k: v for k, v in vessels.items()
+                          if getattr(v, 'vessel_category', None) == category}
+            
+            if bulk_class:
+                bc = BulkCarrierClass.from_string(bulk_class)
+                if bc:
+                    vessels = {k: v for k, v in vessels.items()
+                              if getattr(v, 'bulk_carrier_class', None) == bc}
+            
+            if tanker_class:
+                tc = TankerClass.from_string(tanker_class)
+                if tc:
+                    vessels = {k: v for k, v in vessels.items()
+                              if getattr(v, 'tanker_class', None) == tc}
+            
+            self.send_json_response({
+                'count': len(vessels),
+                'vessels': [v.to_dict() for v in vessels.values()]
+            })
+        except Exception as e:
+            self.send_json_response({'error': str(e)}, status=500)
+    
+    def _handle_bulk_carriers_api(self, parsed_path):
+        """Handle /api/vessels/bulk-carriers endpoint."""
+        try:
+            from services.bulk_tracking_service import classify_all_vessels, get_bulk_carriers, get_bulk_carriers_by_class
+            from enums.bulk_carrier_class import BulkCarrierClass
+            
+            query_params = parse_qs(urlparse(self.path).query)
+            bulk_class_str = query_params.get('class', [None])[0]
+            
+            vessels = {}
+            if tracker_manager.tracker and hasattr(tracker_manager.tracker, 'vessel_service'):
+                vessels = tracker_manager.tracker.vessel_service.get_active_vessels()
+                classify_all_vessels(vessels)
+            
+            if bulk_class_str:
+                bc = BulkCarrierClass.from_string(bulk_class_str)
+                if bc:
+                    vessels = get_bulk_carriers_by_class(vessels, bc)
+                else:
+                    self.send_json_response({
+                        'error': f'Invalid bulk class: {bulk_class_str}',
+                        'valid_classes': [c.value for c in BulkCarrierClass]
+                    }, status=400)
+                    return
+            else:
+                vessels = get_bulk_carriers(vessels)
+            
+            self.send_json_response({
+                'count': len(vessels),
+                'vessels': [v.to_dict() for v in vessels.values()],
+                'available_classes': [
+                    {'name': c.value, 'display_name': c.display_name, 'dwt_range': c.dwt_range_str}
+                    for c in BulkCarrierClass
+                ]
+            })
+        except Exception as e:
+            self.send_json_response({'error': str(e)}, status=500)
+    
+    def _handle_tankers_api(self, parsed_path):
+        """Handle /api/vessels/tankers endpoint."""
+        try:
+            from services.bulk_tracking_service import classify_all_vessels, get_tankers
+            
+            vessels = {}
+            if tracker_manager.tracker and hasattr(tracker_manager.tracker, 'vessel_service'):
+                vessels = tracker_manager.tracker.vessel_service.get_active_vessels()
+                classify_all_vessels(vessels)
+            
+            tankers = get_tankers(vessels)
+            self.send_json_response({
+                'count': len(tankers),
+                'vessels': [v.to_dict() for v in tankers.values()]
+            })
+        except Exception as e:
+            self.send_json_response({'error': str(e)}, status=500)
+    
+    def _handle_statistics_api(self):
+        """Handle /api/statistics endpoint."""
+        try:
+            from services.bulk_tracking_service import classify_all_vessels
+            
+            vessels = {}
+            if tracker_manager.tracker and hasattr(tracker_manager.tracker, 'vessel_service'):
+                vessels = tracker_manager.tracker.vessel_service.get_active_vessels()
+            
+            stats = classify_all_vessels(vessels)
+            self.send_json_response(stats)
+        except Exception as e:
+            self.send_json_response({'error': str(e)}, status=500)
+    
+    def _handle_filters_api(self):
+        """Handle /api/filters endpoint - list available filter options."""
+        try:
+            from enums.bulk_carrier_class import BulkCarrierClass
+            from enums.tanker_class import TankerClass
+            
+            self.send_json_response({
+                'categories': ['Tanker', 'Bulk Carrier', 'Cargo', 'Other'],
+                'bulk_carrier_classes': [
+                    {
+                        'value': c.value,
+                        'display_name': c.display_name,
+                        'dwt_range': c.dwt_range_str,
+                        'typical_cargo': c.typical_cargo,
+                        'color': c.color
+                    }
+                    for c in BulkCarrierClass
+                ],
+                'tanker_classes': [
+                    {
+                        'value': c.value,
+                        'display_name': c.display_name
+                    }
+                    for c in TankerClass
+                ]
+            })
+        except Exception as e:
+            self.send_json_response({'error': str(e)}, status=500)
     
     def do_POST(self):
         """Handle POST requests (no endpoints - worldwide only)."""

@@ -13,6 +13,7 @@ from models.vessel import Vessel
 from enums.ship_type import ShipType
 from enums.navigational_status import NavigationalStatus
 from enums.tanker_class import TankerClass
+from enums.bulk_carrier_class import BulkCarrierClass
 
 logger = logging.getLogger(__name__)
 
@@ -35,8 +36,10 @@ class VesselDisplayService:
         """Get appropriate icon for vessel type."""
         if vessel.is_tanker():
             return '🛢️'
-        elif vessel.ship_type and vessel.ship_type.is_cargo():
+        elif getattr(vessel, 'is_bulk_carrier', False):
             return '📦'
+        elif vessel.ship_type and vessel.ship_type.is_cargo():
+            return '🚢'
         else:
             return '🚢'
     
@@ -54,6 +57,31 @@ class VesselDisplayService:
             return None
         
         return TankerClass.classify(vessel.deadweight)
+    
+    def get_bulk_carrier_class(self, vessel: Vessel) -> Optional[BulkCarrierClass]:
+        """
+        Determine bulk carrier size classification.
+        
+        Uses DWT if available, falls back to vessel dimensions.
+        
+        Args:
+            vessel: Vessel object
+            
+        Returns:
+            BulkCarrierClass enum or None
+        """
+        if not vessel.is_cargo_or_bulk():
+            return None
+        
+        # Use pre-classified value if available
+        if getattr(vessel, 'bulk_carrier_class', None):
+            return vessel.bulk_carrier_class
+        
+        return BulkCarrierClass.classify_best(
+            deadweight=vessel.deadweight,
+            length=vessel.length,
+            width=vessel.width
+        )
     
     def estimate_cargo_capacity(self, vessel: Vessel) -> Optional[str]:
         """
@@ -268,6 +296,43 @@ class VesselDisplayService:
                 </tr>
                 """
         
+        # Bulk Carrier-Specific Information
+        elif getattr(vessel, 'is_bulk_carrier', False) or (vessel.ship_type and vessel.ship_type.is_cargo()):
+            bulk_class = self.get_bulk_carrier_class(vessel)
+            capacity = self.estimate_cargo_capacity(vessel)
+            
+            html += f"""
+                <tr style="background: #fff8e1;">
+                    <td colspan="2" style="padding: 6px 8px; font-weight: 600; border-bottom: 2px solid #ff8f00; color: #e65100;">
+                        📦 Bulk Carrier Details
+                    </td>
+                </tr>
+            """
+            
+            if bulk_class:
+                html += f"""
+                <tr style="background: #fffde7;">
+                    <td style="padding: 4px 8px; color: #666;">Class:</td>
+                    <td style="padding: 4px 8px; font-weight: 600; color: #e65100;">{bulk_class.display_name}</td>
+                </tr>
+                <tr style="background: #fffde7;">
+                    <td style="padding: 4px 8px; color: #666;">DWT Range:</td>
+                    <td style="padding: 4px 8px; font-weight: 500;">{bulk_class.dwt_range_str}</td>
+                </tr>
+                <tr style="background: #fffde7;">
+                    <td style="padding: 4px 8px; color: #666;">Typical Cargo:</td>
+                    <td style="padding: 4px 8px; font-weight: 500;">{bulk_class.typical_cargo}</td>
+                </tr>
+                """
+            
+            if capacity:
+                html += f"""
+                <tr style="background: #fffde7;">
+                    <td style="padding: 4px 8px; color: #666;">Capacity:</td>
+                    <td style="padding: 4px 8px; font-weight: 500;">{capacity}</td>
+                </tr>
+                """
+        
         # Navigation Section
         html += f"""
                 <tr style="background: #e3f2fd;">
@@ -413,6 +478,10 @@ class VesselDisplayService:
             tanker_class = self.get_tanker_class(vessel)
             if tanker_class:
                 parts.append(f"({tanker_class.display_name})")
+        elif getattr(vessel, 'is_bulk_carrier', False):
+            bulk_class = self.get_bulk_carrier_class(vessel)
+            if bulk_class:
+                parts.append(f"({bulk_class.display_name})")
         
         if vessel.speed:
             parts.append(f"{vessel.speed:.1f} kts")

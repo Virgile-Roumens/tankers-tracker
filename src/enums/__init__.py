@@ -8,6 +8,7 @@ from .ship_type import ShipType
 from .navigational_status import NavigationalStatus
 from .region import Region
 from .tanker_class import TankerClass
+from .bulk_carrier_class import BulkCarrierClass
 
-__all__ = ['ShipType', 'NavigationalStatus', 'Region', 'TankerClass']
+__all__ = ['ShipType', 'NavigationalStatus', 'Region', 'TankerClass', 'BulkCarrierClass']
 

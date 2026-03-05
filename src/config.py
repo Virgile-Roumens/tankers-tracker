@@ -17,7 +17,7 @@ AIS_API_KEY = os.getenv("AIS_API_KEY", "77751d32bae3caa0b20f2d7099f03ef5b836fb4c
 AIS_URL = "wss://stream.aisstream.io/v0/stream"
 
 # Application Settings
-MAX_TRACKED_SHIPS = int(os.getenv("MAX_TRACKED_SHIPS", "1000"))  # Increased for more tracking
+MAX_TRACKED_SHIPS = int(os.getenv("MAX_TRACKED_SHIPS", "5000"))  # Increased for bulk + tanker tracking
 UPDATE_INTERVAL = int(os.getenv("UPDATE_INTERVAL", "5"))  # Update map every N position reports
 AUTO_MAP_UPDATE_SECONDS = int(os.getenv("AUTO_MAP_UPDATE_SECONDS", "15"))  # Auto-refresh interval
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
@@ -37,7 +37,11 @@ DATABASE_BATCH_SIZE = int(os.getenv("DATABASE_BATCH_SIZE", "100"))  # Batch data
 USE_ASYNC_DATABASE = os.getenv("USE_ASYNC_DATABASE", "true").lower() == "true"  # Use aiosqlite for async I/O
 
 # Worldwide Tracking Mode - ALWAYS ON (no regional fallback)
-MAX_TRACKED_SHIPS = int(os.getenv("MAX_TRACKED_SHIPS", "5000"))  # All worldwide vessels
+MAX_TRACKED_SHIPS = int(os.getenv("MAX_TRACKED_SHIPS", "10000"))  # All worldwide vessels (tankers + bulk)
+
+# Vessel Type Tracking Configuration
+TRACK_TANKERS = os.getenv("TRACK_TANKERS", "true").lower() == "true"  # Track wet bulk (AIS 80-89)
+TRACK_CARGO_BULK = os.getenv("TRACK_CARGO_BULK", "true").lower() == "true"  # Track dry bulk / cargo (AIS 70-79)
 
 # Ship Type Definitions - now using ShipType enum (see enums/ship_type.py)
 # Cargo vessels: IMO codes 70-79
