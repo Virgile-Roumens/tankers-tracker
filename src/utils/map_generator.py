@@ -822,6 +822,13 @@ class MapGenerator:
                 color: #dc2626;
                 border: 1px solid rgba(239, 68, 68, 0.2);
             }}
+            .searched-vessel-pulse {{
+                animation: searchPulse 2s ease-in-out infinite;
+            }}
+            @keyframes searchPulse {{
+                0%, 100% {{ box-shadow: 0 0 6px 2px rgba(255, 87, 34, 0.6); }}
+                50% {{ box-shadow: 0 0 16px 6px rgba(255, 87, 34, 0.9); }}
+            }}
         </style>
         <div class="control-panel" id="control-panel">
             <div class="control-panel-header">
@@ -917,6 +924,10 @@ class MapGenerator:
                 <div class="legend-item">
                     <span class="legend-dot" style="background: #64b5f6;"></span>
                     <span>Port Terminal</span>
+                </div>
+                <div class="legend-item">
+                    <span class="legend-dot" style="background: #FF5722; box-shadow: 0 0 6px rgba(255,87,34,0.6);"></span>
+                    <span>MMSI Search Result</span>
                 </div>
             </div>
         </div>
@@ -1015,10 +1026,29 @@ class MapGenerator:
                     }
                     
                     if (!foundMarker) {
-                        console.log('❌ Vessel not found:', mmsiNum);
-                        messageDiv.textContent = `❌ MMSI ${mmsi} not found`;
-                        messageDiv.className = 'search-message error';
+                        // Not found among local markers — query the server API
+                        console.log('🌐 MMSI not found locally, querying AIS API...');
+                        messageDiv.textContent = '🔍 Not on map. Searching AIS database...';
+                        messageDiv.className = 'search-message';
                         messageDiv.style.display = 'block';
+                        
+                        fetch('/api/search_mmsi?mmsi=' + mmsi)
+                            .then(function(r) { return r.json(); })
+                            .then(function(data) {
+                                if (data.found) {
+                                    displayApiVessel(data.vessel, map, messageDiv);
+                                } else {
+                                    messageDiv.textContent = data.error || '❌ MMSI ' + mmsi + ' not found';
+                                    messageDiv.className = 'search-message error';
+                                    messageDiv.style.display = 'block';
+                                }
+                            })
+                            .catch(function(err) {
+                                console.error('API search error:', err);
+                                messageDiv.textContent = '❌ Search failed: ' + err.message;
+                                messageDiv.className = 'search-message error';
+                                messageDiv.style.display = 'block';
+                            });
                         return;
                     }
                     
@@ -1049,6 +1079,108 @@ class MapGenerator:
                     console.error('🔴 Search error:', err);
                 }
             };
+            
+            // ==================== MMSI API SEARCH FUNCTIONS ====================
+            
+            // Display a vessel found via the server API (not currently on the map)
+            function displayApiVessel(v, map, messageDiv) {
+                var lat = v.lat || v.latitude || 0;
+                var lon = v.lon || v.longitude || 0;
+                var name = v.name || 'Unknown';
+                var mmsi = String(v.mmsi || '');
+                
+                if (!lat || !lon || (lat === 0 && lon === 0)) {
+                    messageDiv.textContent = '"' + name + '" found but has no position data.';
+                    messageDiv.className = 'search-message error';
+                    messageDiv.style.display = 'block';
+                    return;
+                }
+                
+                // Determine marker color by ship type
+                var shipType = v.ship_type || 0;
+                var category = v.display_class || v.vessel_category || v.ship_type_name || 'Unknown';
+                var color = '#FF5722';
+                if (shipType >= 80 && shipType <= 89) color = '#d32f2f';
+                else if (shipType >= 70 && shipType <= 79) color = '#1976d2';
+                
+                // Build popup HTML
+                var navNames = {0:'Under way (engine)', 1:'At anchor', 2:'Not under command', 3:'Restricted manoeuv.', 4:'Constrained by draught', 5:'Moored', 6:'Aground', 7:'Fishing', 8:'Under way (sailing)', 15:'Not defined'};
+                var navStr = v.navigational_status != null ? (navNames[v.navigational_status] || 'Status ' + v.navigational_status) : 'N/A';
+                var speedStr = v.speed ? parseFloat(v.speed).toFixed(1) + ' kn' : 'N/A';
+                var courseStr = v.course ? parseFloat(v.course).toFixed(1) + '°' : 'N/A';
+                var draughtStr = v.draught ? parseFloat(v.draught).toFixed(1) + ' m' : 'N/A';
+                var dimStr = (v.length && v.width) ? v.length + 'm × ' + v.width + 'm' : 'N/A';
+                
+                var p = '<div style="font-family:-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif;font-size:13px;min-width:260px;">';
+                p += '<div style="background:linear-gradient(135deg,#FF5722,#BF360C);color:#fff;padding:10px 14px;margin:-13px -20px 10px;text-align:center;">';
+                p += '<strong style="font-size:14px;">&#128269; ' + name + '</strong>';
+                p += '<div style="font-size:10px;opacity:0.85;margin-top:3px;letter-spacing:1px;">MMSI SEARCH RESULT</div></div>';
+                p += '<table style="width:100%;border-collapse:collapse;font-size:12px;">';
+                p += '<tr><td style="padding:4px 8px;color:#888;width:40%;">MMSI</td><td style="padding:4px 8px;font-weight:bold;font-family:monospace;">' + mmsi + '</td></tr>';
+                p += '<tr style="background:#f5f5f5;"><td style="padding:4px 8px;color:#888;">IMO</td><td style="padding:4px 8px;">' + (v.imo || 'N/A') + '</td></tr>';
+                p += '<tr><td style="padding:4px 8px;color:#888;">Type</td><td style="padding:4px 8px;">' + category + '</td></tr>';
+                p += '<tr style="background:#f5f5f5;"><td style="padding:4px 8px;color:#888;">Callsign</td><td style="padding:4px 8px;">' + (v.callsign || 'N/A') + '</td></tr>';
+                p += '<tr><td style="padding:4px 8px;color:#888;">Status</td><td style="padding:4px 8px;">' + navStr + '</td></tr>';
+                p += '<tr style="background:#f5f5f5;"><td style="padding:4px 8px;color:#888;">Speed</td><td style="padding:4px 8px;">' + speedStr + '</td></tr>';
+                p += '<tr><td style="padding:4px 8px;color:#888;">Course</td><td style="padding:4px 8px;">' + courseStr + '</td></tr>';
+                p += '<tr style="background:#f5f5f5;"><td style="padding:4px 8px;color:#888;">Position</td><td style="padding:4px 8px;">' + parseFloat(lat).toFixed(5) + ', ' + parseFloat(lon).toFixed(5) + '</td></tr>';
+                p += '<tr><td style="padding:4px 8px;color:#888;">Destination</td><td style="padding:4px 8px;">' + (v.destination || 'Unknown') + '</td></tr>';
+                p += '<tr style="background:#f5f5f5;"><td style="padding:4px 8px;color:#888;">ETA</td><td style="padding:4px 8px;">' + (v.eta || 'N/A') + '</td></tr>';
+                p += '<tr><td style="padding:4px 8px;color:#888;">Draught</td><td style="padding:4px 8px;">' + draughtStr + '</td></tr>';
+                p += '<tr style="background:#f5f5f5;"><td style="padding:4px 8px;color:#888;">Dimensions</td><td style="padding:4px 8px;">' + dimStr + '</td></tr>';
+                p += '<tr><td style="padding:4px 8px;color:#888;">Last Update</td><td style="padding:4px 8px;">' + (v.last_update || 'N/A') + '</td></tr>';
+                p += '</table>';
+                p += '<div style="text-align:center;margin-top:10px;display:flex;gap:6px;justify-content:center;">';
+                p += '<a href="https://www.marinetraffic.com/en/ais/details/ships/mmsi:' + mmsi + '" target="_blank" style="padding:5px 12px;background:#1976D2;color:#fff;border:none;border-radius:4px;text-decoration:none;font-size:11px;">&#127760; MarineTraffic</a>';
+                p += '<button onclick="removeSearchedVessel(' + String.fromCharCode(39) + mmsi + String.fromCharCode(39) + ')" style="padding:5px 12px;background:#D32F2F;color:#fff;border:none;border-radius:4px;cursor:pointer;font-size:11px;">&#10005; Remove</button>';
+                p += '</div></div>';
+                
+                // Create a distinctive CircleMarker
+                var marker = L.circleMarker([lat, lon], {
+                    radius: 8,
+                    color: '#FF5722',
+                    fillColor: color,
+                    fillOpacity: 0.9,
+                    weight: 3,
+                    opacity: 1,
+                    mmsi: parseInt(mmsi),
+                    className: 'searched-vessel-pulse'
+                });
+                
+                marker.bindPopup(p, {maxWidth: 360, minWidth: 280});
+                marker.addTo(map);
+                
+                // Registry management
+                if (!window.searchedVesselMarkers) window.searchedVesselMarkers = {};
+                if (window.searchedVesselMarkers[mmsi] && map.hasLayer(window.searchedVesselMarkers[mmsi])) {
+                    map.removeLayer(window.searchedVesselMarkers[mmsi]);
+                }
+                window.searchedVesselMarkers[mmsi] = marker;
+                if (window.allVesselMarkers) window.allVesselMarkers[parseInt(mmsi)] = marker;
+                
+                // Zoom to vessel and open popup
+                map.setView([lat, lon], 10, {animate: true});
+                setTimeout(function() { marker.openPopup(); }, 400);
+                
+                messageDiv.textContent = 'Found: "' + name + '" — displayed on map';
+                messageDiv.className = 'search-message success';
+                messageDiv.style.display = 'block';
+                setTimeout(function() { messageDiv.style.display = 'none'; }, 6000);
+            }
+            
+            // Remove a vessel marker added by MMSI search
+            function removeSearchedVessel(mmsi) {
+                var map = findLeafletMap();
+                if (window.searchedVesselMarkers && window.searchedVesselMarkers[mmsi]) {
+                    if (map && map.hasLayer(window.searchedVesselMarkers[mmsi])) {
+                        map.removeLayer(window.searchedVesselMarkers[mmsi]);
+                    }
+                    delete window.searchedVesselMarkers[mmsi];
+                }
+                if (map) map.closePopup();
+            }
+            
+            // ==================== END MMSI SEARCH FUNCTIONS ====================
             
             // Global registry to store all vessel markers by MMSI (even when removed from map)
             // Format: { mmsi: marker_layer }

@@ -21,6 +21,7 @@ from urllib.parse import parse_qs, urlparse
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from config import REGIONS
+from services.vessel_lookup import lookup_vessel_in_tracker, lookup_vessel_via_websocket
 
 class TrackerManager:
     """Manages the tanker tracker lifecycle."""
@@ -189,6 +190,11 @@ class TankersTrackerHandler(SimpleHTTPRequestHandler):
             self._handle_filters_api()
             return
         
+        elif parsed_path.path == '/api/search_mmsi':
+            # MMSI vessel search/lookup
+            self._handle_mmsi_search(parsed_path)
+            return
+        
         # Handle static files normally
         return super().do_GET()
     
@@ -332,6 +338,61 @@ class TankersTrackerHandler(SimpleHTTPRequestHandler):
             })
         except Exception as e:
             self.send_json_response({'error': str(e)}, status=500)
+    
+    def _handle_mmsi_search(self, parsed_path):
+        """Handle /api/search_mmsi endpoint - search for a vessel by MMSI."""
+        try:
+            query_params = parse_qs(urlparse(self.path).query)
+            mmsi_str = query_params.get('mmsi', [None])[0]
+            
+            if not mmsi_str:
+                self.send_json_response({'error': 'Missing mmsi parameter'}, status=400)
+                return
+            
+            mmsi_str = mmsi_str.strip()
+            if not mmsi_str.isdigit() or len(mmsi_str) != 9:
+                self.send_json_response({
+                    'error': 'Invalid MMSI format. Must be exactly 9 digits.'
+                }, status=400)
+                return
+            
+            mmsi_int = int(mmsi_str)
+            
+            # Step 1: Check tracker's in-memory cache and database
+            result = lookup_vessel_in_tracker(mmsi_int, tracker_manager)
+            if result:
+                self.send_json_response({
+                    'found': True,
+                    'already_tracked': True,
+                    'source': 'tracker',
+                    'vessel': result
+                })
+                return
+            
+            # Step 2: Try AIS Stream WebSocket lookup (short-lived connection)
+            print(f"\n\U0001f50d MMSI {mmsi_str} not in tracker/database. Querying AIS Stream...")
+            ws_result = lookup_vessel_via_websocket(mmsi_str, timeout=12.0)
+            if ws_result:
+                print(f"\u2705 Found vessel via AIS Stream: {ws_result.get('name', 'Unknown')}")
+                self.send_json_response({
+                    'found': True,
+                    'already_tracked': False,
+                    'source': 'ais_stream',
+                    'vessel': ws_result
+                })
+                return
+            
+            # Not found anywhere
+            print(f"\u274c MMSI {mmsi_str} not found in any source")
+            self.send_json_response({
+                'found': False,
+                'error': f'No vessel found with MMSI {mmsi_str}. The vessel may not be transmitting AIS data currently.'
+            }, status=404)
+            
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            self.send_json_response({'error': f'Search failed: {str(e)}'}, status=500)
     
     def do_POST(self):
         """Handle POST requests (no endpoints - worldwide only)."""
